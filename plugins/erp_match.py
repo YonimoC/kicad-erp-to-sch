@@ -399,8 +399,18 @@ def is_electronic_pn(pn: str) -> bool:
     return len(code) == 9 and code.startswith("1") and code.isdigit()
 
 
+def is_electronic_prefix(pn: str) -> bool:
+    """电子物料大类前缀：1 开头（如 101010511 / 1004201100014）；排除 5xxxxx 成品等。"""
+    code = (pn or "").strip()
+    return code.startswith("1") and code[:1].isdigit()
+
+
 def search_keyword(comp: "Component") -> str:
-    """右键搜索 ERP 时的预填关键字：类别 + 大致封装 + Value/型号。"""
+    """右键搜索 ERP 时的预填关键字：类别 + 大致封装 + Value/型号。
+
+    电阻额外把阻值写成 ",100KΩ"（带逗号前缀）以便精确命中规格字段，
+    避免搜 1KΩ 时把 5.1KΩ 也带出来。
+    """
     kind = getattr(comp, "kind", "") or ""
     label = KIND_LABELS.get(kind, "")
     if kind in ("R", "C", "L", "X", "XO"):
@@ -408,6 +418,12 @@ def search_keyword(comp: "Component") -> str:
     else:
         package = getattr(comp, "package", "") or getattr(comp, "size", "") or ""
     value = (getattr(comp, "model", "") or getattr(comp, "value", "") or "").strip()
+    if kind == "R":
+        number = getattr(comp, "value_num", None)
+        if number is None:
+            number = parse_resistance(value)
+        if number is not None:
+            value = "," + format_resistance(number)
     parts = [p for p in (label, package, value) if p]
     if not parts:
         parts = [value] if value else []
@@ -867,6 +883,8 @@ def build_candidates(comp: Component, materials: Iterable[Material],
     for parsed in parsed_materials:
         if parsed.material.disabled:
             continue
+        if not is_electronic_prefix(parsed.material.pn):
+            continue  # 只认电子物料（1 开头），排除 5xxxxx 成品等
         if not _material_matches(comp, parsed):
             continue
         result.append(Candidate(parsed=parsed,
@@ -916,6 +934,8 @@ def build_generic_candidates(comp: Component, config: Config,
     result: List[Candidate] = []
     for parsed in parsed_materials:
         if parsed.material.disabled:
+            continue
+        if not is_electronic_prefix(parsed.material.pn):
             continue
         if parsed.mount and comp.mount and parsed.mount != comp.mount:
             continue
