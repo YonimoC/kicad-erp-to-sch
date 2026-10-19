@@ -48,12 +48,24 @@ EXTRA_RULES: List[Dict[str, str]] = [
         "order": "料号名称、型号、颜色、电压、电流、尺寸、品牌",
         "example": "贴片发光二极管,G504DC,绿发翠绿光,φ5mm,卓越微",
     },
+    {
+        "name": "插件二极管",
+        "order": "料号名称、型号、反向耐压(Vr)、整流电流、尺寸、品牌",
+        "example": "插件二极管,1N4148,100V,150mA,DO-35,品牌",
+    },
+    {
+        "name": "插件集成电路",
+        "order": "料号名称、IC类型、型号、尺寸、工作电压、品牌",
+        "example": "插件集成电路,运算放大器,LM358,DIP-8,5V,ST",
+    },
 ]
 
 #: 元件类别 -> 默认规则
 _KIND_RULE = {
     "R": "贴片电阻",
     "C": "贴片电容",
+    "L": "贴片电感",
+    "X": "贴片晶振",
     "D": "贴片二极管",
     "IC": "IC类",
     "Q": "贴片三极管",
@@ -142,8 +154,10 @@ def suggest_rule_name(comp) -> str:
     if kind in _KIND_RULE and tht:
         tht_map = {
             "R": "插件电阻",
-            "C": "插件电容",
-            "D": "插件发光二极管" if ("led" in text or "发光" in text) else "贴片二极管",
+            "C": "插件电解电容" if (getattr(comp, "value_num", None) or 0) >= 1e-6 else "插件电容",
+            "L": "插件电感",
+            "X": "插件晶振",
+            "D": "插件发光二极管" if ("led" in text or "发光" in text) else "插件二极管",
             "IC": "插件集成电路",
             "Q": "插件三极管",
             "MOS": "插件场效应管",
@@ -230,7 +244,9 @@ def _field_value(field: str, index: int, rule_name: str, comp, config) -> str:
     kind = getattr(comp, "kind", "") or ""
     size = getattr(comp, "size", "") or ""
     package = getattr(comp, "package", "") or ""
-    model = getattr(comp, "model", "") or getattr(comp, "value", "") or ""
+    model = getattr(comp, "model", "") or ""
+    if not model and kind not in ("R", "C", "L", "X"):
+        model = getattr(comp, "value", "") or ""
     brand = str(config.get("new_brand") or "FH")
 
     if index == 0:
@@ -255,6 +271,31 @@ def _field_value(field: str, index: int, rule_name: str, comp, config) -> str:
     if "容值" in key:
         return _format_capacitance(comp) or (getattr(comp, "value", "") or "")
     if "感值" in key or "电感值" in key:
+        try:
+            from erp_match import format_inductance, parse_inductance
+
+            value = getattr(comp, "value_num", None)
+            if value is None:
+                value = parse_inductance(getattr(comp, "value", "") or "")
+            if value:
+                return format_inductance(value)
+        except Exception:
+            pass
+        return getattr(comp, "value", "") or ""
+    if "电流" in key:
+        current = getattr(comp, "current", None)
+        return f"{current:g}A" if current else ""
+    if "频率" in key:
+        try:
+            from erp_match import format_frequency, parse_frequency
+
+            value = getattr(comp, "value_num", None)
+            if value is None:
+                value = parse_frequency(getattr(comp, "value", "") or "")
+            if value:
+                return format_frequency(value)
+        except Exception:
+            pass
         return getattr(comp, "value", "") or ""
     if "误差" in key or "精度" in key:
         tolerance = _format_tolerance(comp)

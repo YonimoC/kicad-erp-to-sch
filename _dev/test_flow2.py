@@ -75,7 +75,9 @@ def main() -> int:
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
     print("状态统计:", states)
-    assert states.get("插件件跳过", 0) >= 20, states
+    # 插件元件现在也参与匹配（不再全部跳过）
+    assert states.get("插件件跳过", 0) == 0, states
+    assert states.get("已匹配", 0) >= 1, states
     assert states.get("已是最新", 0) == 0, states
 
     dlg.Destroy()

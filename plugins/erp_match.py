@@ -40,13 +40,19 @@ PACKAGE_RE = re.compile(
     re.I,
 )
 
-_RES_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([kKmMRr])?(\d*)$")
+_RES_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([kKmMuU]?)(\d*)$")
 _CAP_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([pnuµμPNU])?(\d*)$")
+_L_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([pnuµmM]?)(\d*)$")
+_RES_DECIMAL_RE = re.compile(r"^(\d+)R(\d+)$", re.I)
 _TOL_RE = re.compile(r"±?\s*(\d+(?:\.\d+)?)\s*%")
 _VOLT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*V(?![A-Za-z])")
 _POWER_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s*W", re.I)
 _DIELECTRIC_RE = re.compile(r"(X7R|X5R|X6S|X6T|NPO|NP0|C0G|COG|Y5V|Z5U)", re.I)
 _MODEL_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-/\+_]*$")
+_FREQ_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kKmMgG]?)\s*Hz", re.I)
+_FREQ_SHORT_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*([kKmMgG])$")
+#: 常见晶振封装尺寸（4 位代码）
+CRYSTAL_SIZE_RE = re.compile(r"(?<!\d)(1612|2016|2520|3225|5032|7050|6035|8038)(?!\d)")
 
 _UNIT_SCALE = {
     "p": 1e-12, "P": 1e-12,
@@ -55,9 +61,19 @@ _UNIT_SCALE = {
     "µ": 1e-6, "μ": 1e-6,
 }
 
+#: 电阻单位倍率（小写 m 为毫欧，大写 M 为兆欧）
+_RES_SCALE = {
+    "k": 1e3, "K": 1e3,
+    "M": 1e6,
+    "m": 1e-3,
+    "u": 1e-6, "U": 1e-6,
+}
+
 KIND_LABELS = {
     "R": "电阻",
     "C": "电容",
+    "L": "电感",
+    "X": "晶振",
     "D": "二极管",
     "IC": "芯片",
     "Q": "三极管",
@@ -121,7 +137,7 @@ def _normalize_decimal_comma(text: str) -> str:
 
 
 def _res_multiplier(unit: str) -> float:
-    return {"k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6, "r": 1.0, "R": 1.0}.get(unit, 1.0)
+    return _RES_SCALE.get(unit, 1.0)
 
 
 def _parse_compact_resistance(token: str) -> Optional[float]:
@@ -130,6 +146,16 @@ def _parse_compact_resistance(token: str) -> Optional[float]:
         return None
     t = t.replace("Ω", "").replace("ω", "")
     t = re.sub(r"(?i)ohms?$", "", t)
+    # 0R026 / 4R7：字母 R 当小数点
+    decimal = _RES_DECIMAL_RE.match(t)
+    if decimal:
+        try:
+            return float(f"{decimal.group(1)}.{decimal.group(2)}")
+        except ValueError:
+            return None
+    # 26mR：末尾 R 只是单位符号，去掉后再看倍率
+    if len(t) > 1 and t[-1] in "Rr":
+        t = t[:-1]
     m = _RES_COMPACT_RE.match(t)
     if not m:
         return None
@@ -197,6 +223,91 @@ def parse_capacitance(text: str) -> Optional[float]:
     return None
 
 
+def _parse_compact_inductance(token: str) -> Optional[float]:
+    """10uH / 4u7 / 100nH / 2m2 → 亨利。"""
+    t = _normalize_decimal_comma((token or "").strip()).replace("µ", "u").replace("μ", "u")
+    if not t:
+        return None
+    if t[-1:] in ("H", "h"):
+        t = t[:-1]
+    m = _L_COMPACT_RE.match(t)
+    if not m:
+        return None
+    whole, unit, frac = m.group(1), m.group(2), m.group(3)
+    try:
+        base = float(f"{whole}.{frac}") if frac else float(whole)
+    except ValueError:
+        return None
+    scale = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "m": 1e-3, "M": 1e-3}.get(unit or "", 1.0)
+    return base * scale
+
+
+def parse_inductance(text: str) -> Optional[float]:
+    """从描述里解析感值（亨利）。"""
+    if not text:
+        return None
+    for m in re.finditer(r"(\d+(?:\.\d+)?\s*[pnuµmM]?\d*)\s*[Hh](?![A-Za-z])", text):
+        value = _parse_compact_inductance(m.group(1))
+        if value is not None:
+            return value
+    return None
+
+
+def parse_current(text: str) -> Optional[float]:
+    """从描述里解析额定电流（安培），如 10uH/5A 里的 5。"""
+    if not text:
+        return None
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*A(?![A-Za-z])", text):
+        try:
+            return float(m.group(1))
+        except ValueError:
+            continue
+    return None
+
+
+def format_inductance(value: float) -> str:
+    if value >= 1e-3:
+        return f"{value * 1e3:g}mH"
+    if value >= 1e-6:
+        return f"{value * 1e6:g}uH"
+    return f"{value * 1e9:g}nH"
+
+
+def parse_frequency(text: str) -> Optional[float]:
+    """从描述/数值里解析频率（Hz）：8MHz / 32.768kHz / 8M。"""
+    if not text:
+        return None
+    scale = {"k": 1e3, "m": 1e6, "g": 1e9}
+    for m in _FREQ_RE.finditer(text):
+        try:
+            base = float(m.group(1))
+        except ValueError:
+            continue
+        unit = (m.group(2) or "").lower()
+        return base * scale.get(unit, 1.0)
+    short = _FREQ_SHORT_RE.match((text or "").strip())
+    if short:
+        try:
+            base = float(short.group(1))
+        except ValueError:
+            return None
+        return base * scale.get(short.group(2).lower(), 1.0)
+    return None
+
+
+def format_frequency(value: float) -> str:
+    if value >= 1e6:
+        return f"{value / 1e6:g}MHz"
+    if value >= 1e3:
+        return f"{value / 1e3:g}kHz"
+    return f"{value:g}Hz"
+
+
+def extract_crystal_size(text: str) -> str:
+    m = CRYSTAL_SIZE_RE.search(text or "")
+    return m.group(1) if m else ""
+
+
 def parse_tolerance(text: str) -> Optional[float]:
     if not text:
         return None
@@ -245,6 +356,8 @@ def format_resistance(value: float) -> str:
         return f"{value / 1e6:g}MΩ"
     if value >= 1e3:
         return f"{value / 1e3:g}KΩ"
+    if value < 1:
+        return f"{value * 1e3:g}mΩ"
     return f"{value:g}Ω"
 
 
@@ -299,29 +412,45 @@ def extract_model_from_spec(spec: str) -> str:
 class ParsedMaterial:
     material: Material
     kind: str = ""              # R / C / D / IC / Q / MOS
+    mount: str = ""             # SMT / THT（贴片 / 插件）
     size: str = ""              # 0603…
     model: str = ""             # SS14 / LM358 / BC847C / AO3400A
     package: str = ""           # SOT-23 / SOD-123 / SOP-8
     value: Optional[float] = None
     tolerance: Optional[float] = None
     voltage: Optional[float] = None
+    current: Optional[float] = None
     dielectric: str = ""
     power: str = ""
     brand: str = ""
 
 
-def _classify_material(material: Material) -> str:
+def _material_mount(text: str) -> str:
+    """从名称+描述判断是贴片还是插件。"""
+    if "插件" in text and "贴片" not in text:
+        return "THT"
+    if "贴片" in text and "插件" not in text:
+        return "SMT"
+    low = text.lower()
+    if "smd" in low:
+        return "SMT"
+    if any(k in low for k in ("hc-49", "hc49", "dip")):
+        return "THT"
+    return ""
+
+
+def _classify_material(material: Material, mount: str = "") -> str:
     name = material.name or ""
     spec = material.spec or ""
     text = f"{name} {spec}"
-    if "插件" in text and "贴片" not in text:
-        return ""
-    if "贴片" not in text:
+    if not mount:
+        mount = _material_mount(text)
+    if not mount:
         return ""
 
-    if "集成电路" in text or name.startswith("贴片IC") or name.startswith("贴片集成电路"):
+    if "集成电路" in text or "集成块" in text or "芯片" in text:
         return "IC"
-    if "热敏" in text or "可调" in text or "电位" in text or "采样" in text:
+    if "热敏" in text or "可调" in text or "电位" in text or "采样" in text or "压敏" in text:
         return ""
     if "MOS" in name.upper() or "场效应" in text:
         return "MOS"
@@ -331,9 +460,16 @@ def _classify_material(material: Material) -> str:
         return ""          # 发光二极管不参与匹配
     if "二极管" in text:
         return "D"
+    if "晶振" in text or "crystal" in text.lower():
+        return "X"
+    if "电感" in text and "共模" not in text and "磁珠" not in text:
+        return "L"
     if "电阻" in text and "排阻" not in text and "合金" not in text:
         return "R"
-    if "电容" in text and "电解" not in text and "钽" not in text:
+    if "电容" in text:
+        # 贴片电解/钽电容仍不自动匹配；插件电解电容是常见物料，允许匹配
+        if mount == "SMT" and ("电解" in text or "钽" in text):
+            return ""
         return "C"
     return ""
 
@@ -365,18 +501,24 @@ def _brand_from_text(text: str, config: Config) -> str:
 
 def parse_material(material: Material, config: Config) -> ParsedMaterial:
     parsed = ParsedMaterial(material=material, brand=normalize_brand(material.brand, config))
-    parsed.kind = _classify_material(material)
     text = f"{material.name} {material.spec}"
+    parsed.mount = _material_mount(text)
+    parsed.kind = _classify_material(material, parsed.mount)
     if not parsed.brand:
         parsed.brand = _brand_from_text(text, config)
 
-    parsed.size = extract_size(text)
+    parsed.size = extract_size(text) or extract_crystal_size(text)
     parsed.package = extract_package(material.spec) or extract_package(material.name)
     parsed.tolerance = parse_tolerance(material.spec)
 
     if parsed.kind == "R":
         parsed.value = parse_resistance(material.spec) or parse_resistance(material.name)
         parsed.power = parse_power(material.spec)
+    elif parsed.kind == "X":
+        parsed.value = parse_frequency(material.spec) or parse_frequency(material.name)
+    elif parsed.kind == "L":
+        parsed.value = parse_inductance(material.spec) or parse_inductance(material.name)
+        parsed.current = parse_current(material.spec)
     elif parsed.kind == "C":
         parsed.value = parse_capacitance(material.spec)
         parsed.voltage = parse_voltage(material.spec)
@@ -407,6 +549,10 @@ class Component:
     tolerance: Optional[float] = None
     description: str = ""
     partnumber: str = ""
+    #: "SMT" 贴片 / "THT" 插件
+    mount: str = "SMT"
+    #: 额定电流（电感等，单位 A）
+    current: Optional[float] = None
     #: 属性是否已隐藏（False/缺失 表示会显示在原理图上）
     fields_hidden: Dict[str, bool] = field(default_factory=dict)
 
@@ -447,6 +593,7 @@ def analyze_component(comp: Component, config: Config) -> Component:
     comp.size = extract_size(comp.footprint) or extract_size(comp.value)
     comp.package = extract_package(comp.footprint) or extract_package(comp.value)
     comp.tolerance = parse_tolerance(comp.value)
+    comp.mount = "THT" if is_tht_footprint(comp.footprint) else "SMT"
 
     if prefix.startswith("LED"):
         return comp  # 发光二极管不匹配
@@ -456,6 +603,11 @@ def analyze_component(comp: Component, config: Config) -> Component:
         comp.kind = "R"
     elif prefix.startswith("C"):
         comp.kind = "C"
+    elif prefix.startswith("L") or any(k in lib_low for k in ("inductor", "ferrite")):
+        comp.kind = "L"
+    elif any(k in lib_low for k in ("crystal", "resonator", "xtal")):
+        comp.kind = "X"
+        comp.size = extract_crystal_size(comp.footprint) or comp.size
     elif prefix.startswith("D"):
         if _looks_like_led(lib, comp.value):
             return comp
@@ -471,6 +623,11 @@ def analyze_component(comp: Component, config: Config) -> Component:
         comp.value_num = parse_resistance(comp.value)
     elif comp.kind == "C":
         comp.value_num = parse_capacitance(comp.value)
+    elif comp.kind == "L":
+        comp.value_num = parse_inductance(comp.value)
+        comp.current = parse_current(comp.value)
+    elif comp.kind == "X":
+        comp.value_num = parse_frequency(comp.value)
     else:
         comp.model = (comp.value or "").strip()
     return comp
@@ -552,6 +709,9 @@ def _dielectric_rank(dielectric: str, kind: str, config: Config) -> int:
 def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
     if not parsed.kind or parsed.kind != comp.kind:
         return False
+    # 贴片/插件必须是同一类，避免把插件料用到贴片元件上
+    if parsed.mount and comp.mount and parsed.mount != comp.mount:
+        return False
     material = parsed.material
 
     if comp.kind in ("R", "C"):
@@ -560,6 +720,25 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
         if comp.value_num is None or parsed.value is None:
             return False
         return _num_equal(parsed.value, comp.value_num)
+
+    if comp.kind == "X":
+        if comp.size and parsed.size and comp.size != parsed.size:
+            return False
+        if comp.value_num is None or parsed.value is None:
+            return False
+        return _num_equal(parsed.value, comp.value_num)
+
+    if comp.kind == "L":
+        if comp.size and parsed.size and comp.size != parsed.size:
+            return False
+        if comp.value_num is None or parsed.value is None:
+            return False
+        if not _num_equal(parsed.value, comp.value_num):
+            return False
+        # 物料额定电流低于元件需求时排除（任一侧未知则不比较）
+        if comp.current and parsed.current and parsed.current + 1e-9 < comp.current:
+            return False
+        return True
 
     # 二极管 / IC / 三极管 / MOS：按型号匹配
     if not comp.model:
@@ -591,6 +770,23 @@ def build_candidates(comp: Component, materials: Iterable[Material],
 
     def sort_key(candidate: Candidate):
         stock = -candidate.material.stock
+        if comp.kind == "L":
+            return (
+                candidate.brand_rank,
+                _tolerance_rank(candidate.parsed.tolerance, comp.tolerance, comp.kind, config),
+                0 if candidate.parsed.current else 1,
+                -(candidate.parsed.current or 0.0),
+                stock,
+                candidate.pn,
+            )
+        if comp.kind == "X":
+            return (
+                candidate.brand_rank,
+                0 if (comp.size and candidate.parsed.size == comp.size) else 1,
+                1 if "有源" in (candidate.material.name or "") else 0,
+                stock,
+                candidate.pn,
+            )
         if comp.kind in ("R", "C"):
             return (
                 candidate.brand_rank,
@@ -605,6 +801,27 @@ def build_candidates(comp: Component, materials: Iterable[Material],
         return (model_exact, package_rank, stock, candidate.pn)
 
     result.sort(key=sort_key)
+    return result
+
+
+def build_generic_candidates(comp: Component, config: Config,
+                             parsed_materials: Sequence[ParsedMaterial]) -> List[Candidate]:
+    """未分类元件（连接器/开关/晶振等）按型号在所有物料里找。"""
+    needle = normalize_model(comp.model or comp.value)
+    if len(needle) < 4:
+        return []
+    result: List[Candidate] = []
+    for parsed in parsed_materials:
+        if parsed.material.disabled:
+            continue
+        if parsed.mount and comp.mount and parsed.mount != comp.mount:
+            continue
+        haystack = (normalize_model(parsed.material.spec) + "|"
+                    + normalize_model(parsed.material.name))
+        if needle in haystack:
+            result.append(Candidate(parsed=parsed,
+                                    brand_rank=_brand_rank(parsed.brand, config, comp.kind)))
+    result.sort(key=lambda c: (-c.material.stock, c.pn))
     return result
 
 
@@ -629,6 +846,19 @@ def auto_select(candidates: Sequence[Candidate], config: Config,
 # --------------------------------------------------------------------------
 # 新建物料
 # --------------------------------------------------------------------------
+#: 插件（THT）新料对应的《物料参数要求表》类别
+THT_KIND_RULES = {
+    "R": "插件电阻",
+    "C": "插件电容",
+    "L": "插件电感",
+    "X": "插件晶振",
+    "D": "插件二极管",
+    "IC": "插件集成电路",
+    "Q": "插件三极管",
+    "MOS": "插件场效应管",
+}
+
+
 def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
     """返回 (PartNumber, 描述)。字段顺序遵循内置的《物料参数要求表》。
 
@@ -638,6 +868,21 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
     pn = config.get("new_partnumber") or "（新料）"
     size = comp.size or ""
     package = comp.package or comp.size or ""
+
+    # 插件元件先按插件的参数要求表生成
+    if comp.mount == "THT" and comp.kind in THT_KIND_RULES:
+        try:
+            import erp_rules
+
+            rule_name = THT_KIND_RULES[comp.kind]
+            if comp.kind == "C" and (comp.value_num or 0) >= 1e-6:
+                rule_name = "插件电解电容"
+            description = erp_rules.build_description(rule_name, comp, config)
+            if description:
+                return pn, description
+        except Exception:
+            pass
+
 
     if comp.kind == "R":
         value_text = format_resistance(comp.value_num) if comp.value_num else comp.value

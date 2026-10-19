@@ -25,6 +25,7 @@ from erp_match import (
     analyze_component,
     auto_select,
     build_candidates,
+    build_generic_candidates,
     build_new_item,
     is_tht_footprint,
     parse_material,
@@ -382,6 +383,8 @@ class ErpToSchDialog(wx.Dialog):
         self.sort_ascending = True
         self._column_titles: List[str] = []
         self._column_widths: List[int] = []
+        #: 写入范围（默认全选）
+        self.write_filters: Dict[str, bool] = {"已匹配": True, "新料": True, "手动": True}
 
         self._build_ui()
         self._detect_project()
@@ -419,7 +422,10 @@ class ErpToSchDialog(wx.Dialog):
                        self.btn_search, self.btn_rules):
             tools.Add(button, 0, wx.RIGHT, 8)
         tools.AddStretchSpacer()
-        tools.Add(self.btn_apply, 0)
+        self.btn_apply = wx.Button(panel, label="写入原理图")
+        self.btn_apply_opts = wx.Button(panel, label="写入范围 ▾", style=wx.BU_EXACTFIT)
+        tools.Add(self.btn_apply, 0, wx.RIGHT, 4)
+        tools.Add(self.btn_apply_opts, 0)
         root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
@@ -448,6 +454,7 @@ class ErpToSchDialog(wx.Dialog):
         self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search_material())
         self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
         self.btn_apply.Bind(wx.EVT_BUTTON, lambda e: self._apply())
+        self.btn_apply_opts.Bind(wx.EVT_BUTTON, lambda e: self._on_write_menu())
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._activate_row())
         self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_column_click)
         self.list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._on_right_click)
@@ -617,10 +624,10 @@ class ErpToSchDialog(wx.Dialog):
 
     def _group_key(self, comp: Component) -> Tuple[str, str, str, str]:
         """分组依据：类别 + 数值/型号 + 容差 + 封装。"""
-        if comp.kind == "R" and comp.value_num is not None:
-            value = f"R{comp.value_num:.6g}"
-        elif comp.kind == "C" and comp.value_num is not None:
-            value = f"C{comp.value_num:.6g}"
+        if comp.kind in ("R", "C", "L", "X") and comp.value_num is not None:
+            value = f"{comp.kind}{comp.value_num:.6g}"
+            if comp.kind == "L" and comp.current:
+                value += f"/{comp.current:g}A"
         else:
             value = (comp.model or comp.value or "").strip().upper()
         tolerance = f"{comp.tolerance:g}" if comp.tolerance else ""
@@ -649,22 +656,28 @@ class ErpToSchDialog(wx.Dialog):
     def _match_component(self, comp: Component) -> MatchRow:
         row = MatchRow(comp=comp)
 
-        if is_tht_footprint(comp.footprint):
-            row.status = "插件件跳过"
-            row.note = "第一版只匹配贴片元件"
-            return row
-
         if not comp.kind:
-            row.status = "未自动匹配"
-            row.note = "该类型不参与自动匹配（如 LED/连接器），可手动搜索物料"
+            # 连接器 / 开关 / 晶振等未分类元件：按型号在物料表里找（区分贴片/插件）
+            row.candidates = build_generic_candidates(comp, self.config, self.parsed_materials)
+            if len(row.candidates) == 1:
+                chosen = row.candidates[0]
+                row.selected = chosen
+                row.pn = chosen.pn
+                row.description = chosen.description
+                row.status = "已匹配"
+                row.note = "按型号匹配"
+            else:
+                row.status = "未自动匹配"
+                row.note = ("该类型不参与自动匹配（如 LED/连接器），可手动搜索物料或右键生成新料"
+                            if not row.candidates else "有多个同型号物料，请「选择候选…」")
             return row
 
-        if comp.kind in ("R", "C") and not comp.size:
+        if comp.kind in ("R", "C") and comp.mount == "SMT" and not comp.size:
             row.status = "缺少封装"
             row.note = "无法从 Footprint 识别尺寸"
             return row
 
-        if comp.kind in ("R", "C") and comp.value_num is None:
+        if comp.kind in ("R", "C", "L", "X") and comp.value_num is None:
             row.status = "无法识别数值"
             row.note = f"Value={comp.value}"
             return row
@@ -939,6 +952,49 @@ class ErpToSchDialog(wx.Dialog):
             dlg.ShowModal()
 
     # -- 写入 -------------------------------------------------------------
+    def _on_write_menu(self) -> None:
+        """写入范围下拉：勾选已匹配 / 新料 / 手动修改。"""
+        menu = wx.Menu()
+        labels = {"已匹配": "写入已匹配的物料",
+                  "新料": "写入新料（（新料））",
+                  "手动": "写入手动修改的"}
+        id_to_key: Dict[int, str] = {}
+        for key, label in labels.items():
+            item = menu.AppendCheckItem(wx.ID_ANY, label)
+            item.Check(self.write_filters.get(key, True))
+            id_to_key[item.GetId()] = key
+        menu.AppendSeparator()
+        item_all = menu.Append(wx.ID_ANY, "全选")
+
+        def on_choose(event) -> None:
+            key = id_to_key.get(event.GetId())
+            if key:
+                self.write_filters[key] = not self.write_filters[key]
+            elif event.GetId() == item_all.GetId():
+                for k in self.write_filters:
+                    self.write_filters[k] = True
+            self._update_apply_label()
+
+        menu.Bind(wx.EVT_MENU, on_choose)
+        pos = self.btn_apply_opts.ClientToScreen(wx.Point(0, self.btn_apply_opts.GetSize().height))
+        self.PopupMenu(menu, self.ScreenToClient(pos))
+        menu.Destroy()
+
+    def _update_apply_label(self) -> None:
+        enabled = [k for k, v in self.write_filters.items() if v]
+        self.btn_apply.SetLabel("写入原理图" if len(enabled) == 3 else f"写入原理图（{'/'.join(enabled) or '无'}）")
+        self.btn_apply.Enable(bool(enabled))
+        self.btn_apply_opts.SetToolTip("选择写入范围：" + ("、".join(enabled) or "未选择"))
+
+    def _write_enabled(self, row: MatchRow) -> bool:
+        if row.status == "已匹配":
+            return self.write_filters.get("已匹配", True)
+        if row.status == "新料":
+            return self.write_filters.get("新料", True)
+        if row.status == "手动":
+            return self.write_filters.get("手动", True)
+        return False
+
     def _apply(self) -> None:
         if not self.rows:
             wx.MessageBox("还没有匹配结果，请先点击「扫描并匹配」。", APP_TITLE,
@@ -946,7 +1002,8 @@ class ErpToSchDialog(wx.Dialog):
             return
 
         todo = [r for r in self.rows
-                if r.pn and r.status != "已是最新" and self._row_needs_update(r)]
+                if r.pn and r.status != "已是最新"
+                and self._write_enabled(r) and self._row_needs_update(r)]
         if not todo:
             wx.MessageBox("没有需要写入的改动。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
             return
