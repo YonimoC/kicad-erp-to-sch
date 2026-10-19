@@ -1,0 +1,27 @@
+{
+    "$schema": "https://go.kicad.org/pcm/schemas/v2",
+    "name": "ERP to SCH",
+    "description": "按原理图元件的数值/封装匹配 ERP 物料，写入 PartNumber 与 Description",
+    "description_full": "在原理图编辑器工具栏一键扫描当前工程，按元件的 Value 与封装（如 10K + R_0603_1608Metric）到 ERP 原材料基础数据中匹配同尺寸同数值的物料。品牌优先级 FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅在有库存时使用)；都没有时按《物料参数要求表》的字段顺序新建 FH 新料并把 PartNumber 写为「（新料）」。匹配结果会写入元件的 PartNumber（不存在则自动新建该字段）与 Description 字段，写入前自动备份 .kicad_sch。适用于 KiCad 10 原理图编辑器（IPC 插件）。",
+    "identifier": "com.github.YonimoC.kicad-erp-to-sch",
+    "type": "plugin",
+    "author": {
+        "name": "LWH",
+        "contact": {
+            "web": "https://github.com/YonimoC/kicad-erp-to-sch"
+        }
+    },
+    "license": "MIT",
+    "resources": {
+        "homepage": "https://github.com/YonimoC/kicad-erp-to-sch"
+    },
+    "versions": [
+        {
+            "version": "0.1.0",
+            "status": "testing",
+            "kicad_version": "10.0",
+            "runtime": "ipc",
+            "install_size": 60000
+        }
+    ]
+}

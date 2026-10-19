@@ -1,0 +1,28 @@
+{
+  "$schema": "https://go.kicad.org/api/schemas/v1",
+  "identifier": "com.github.YonimoC.kicad-erp-to-sch",
+  "name": "ERP 物料匹配",
+  "description": "按原理图元件的 Value/封装匹配 ERP 物料，写入 PartNumber 与 Description",
+  "runtime": {
+    "type": "python",
+    "version": "3"
+  },
+  "actions": [
+    {
+      "identifier": "erp-to-sch.match",
+      "name": "ERP 物料匹配",
+      "description": "匹配原理图元件与 ERP 物料，写入 PartNumber / Description",
+      "show-button": true,
+      "scopes": [
+        "schematic"
+      ],
+      "entrypoint": "erp_to_sch.py",
+      "icons-light": [
+        "icons/erp_to_sch.png"
+      ],
+      "icons-dark": [
+        "icons/erp_to_sch_dark.png"
+      ]
+    }
+  ]
+}

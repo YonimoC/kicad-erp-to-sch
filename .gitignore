@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.zip
+*.bak
+*.erp-bak
+*.erp-tmp
+
+# ERP 原始数据（含公司物料信息，不提交）
+*.xls
+*.xlsx
+
+# 本地测试
+_dev/_tmp*/

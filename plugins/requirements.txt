@@ -1,0 +1,9 @@
+# KiCad IPC API (matches KiCad 10.0.x)
+kicad-python==0.7.1
+
+# Read ERP export files (.xls BIFF / .xlsx)
+xlrd==2.0.1
+openpyxl>=3.1,<4
+
+# Detect the active project via the parent KiCad process
+psutil>=5.9
