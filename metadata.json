@@ -17,11 +17,11 @@
     },
     "versions": [
         {
-            "version": "0.1.0",
-            "status": "testing",
+            "version": "1.0.0",
+            "status": "stable",
             "kicad_version": "10.0",
             "runtime": "ipc",
-            "install_size": 60000
+            "install_size": 43000
         }
     ]
 }
