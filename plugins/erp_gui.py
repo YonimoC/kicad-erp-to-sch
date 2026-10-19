@@ -522,6 +522,8 @@ class ErpToSchDialog(wx.Dialog):
         self.write_filters: Dict[str, bool] = {"已匹配": True, "新料": True, "手动": True}
         #: 参与自动匹配的类别（默认全选）
         self.match_kinds: Dict[str, bool] = {}
+        #: 工程目录是否由用户手动选过（手动时优先用手动值）
+        self._project_manual = False
 
         self._build_ui()
         self._detect_project()
@@ -617,6 +619,7 @@ class ErpToSchDialog(wx.Dialog):
                           defaultPath=self.txt_project.GetValue() or "") as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.txt_project.SetValue(dlg.GetPath())
+                self._project_manual = True
                 self._on_path_changed()
 
     def _on_path_changed(self) -> None:
@@ -625,25 +628,34 @@ class ErpToSchDialog(wx.Dialog):
         self.config.save()
 
     def _detect_project(self) -> None:
+        """自动定位当前工程：以 KiCad 当前打开的原理图为准，不再沿用上次的。"""
         filename, project_dir = kicad_session.get_open_schematic()
+        detected = ""
         if project_dir and os.path.isdir(project_dir):
-            self.txt_project.SetValue(project_dir)
+            detected = os.path.abspath(project_dir)
         elif filename:
             path = kicad_session.find_schematic(
-                filename, [self.config.get("last_project_dir") or ""])
+                filename, [self.config.get("last_project_dir") or "",
+                           self.txt_project.GetValue().strip() or ""])
             if path:
-                self.txt_project.SetValue(os.path.dirname(path))
-        if not self.txt_project.GetValue():
+                detected = os.path.dirname(path)
+        if not detected:
             for folder in (kicad_session.process_hint_dirs()
                            + kicad_session.open_project_dirs()):
                 root = kicad_session.find_root_schematic(folder)
                 if root:
-                    self.txt_project.SetValue(os.path.dirname(root))
+                    detected = os.path.dirname(root)
                     break
-        if self.txt_project.GetValue():
-            self.config.set("last_project_dir", self.txt_project.GetValue())
+
+        current = self.txt_project.GetValue().strip()
+        if detected:
+            if os.path.normcase(current) != os.path.normcase(detected):
+                self.txt_project.SetValue(detected)
+            self.config.set("last_project_dir", detected)
             self.config.save()
-            self._log(f"工程目录: {self.txt_project.GetValue()}")
+            self._log(f"工程目录: {detected}")
+        elif current:
+            self._log(f"未检测到当前工程，沿用上次: {current}")
         else:
             self._log("未自动检测到工程目录（扫描时会再尝试一次）。")
 
@@ -669,24 +681,33 @@ class ErpToSchDialog(wx.Dialog):
         filename, ipc_dir = kicad_session.get_open_schematic()
         project = self.txt_project.GetValue().strip()
 
-        dirs: List[str] = []
-        for d in (project, ipc_dir):
-            if d and d not in dirs and os.path.isdir(d):
-                dirs.append(d)
-        for d in kicad_session.process_hint_dirs() + kicad_session.open_project_dirs():
-            if d not in dirs and os.path.isdir(d):
-                dirs.append(d)
-
-        if filename:
-            for d in dirs:
-                candidate = os.path.join(d, filename)
+        def try_dir(folder: str) -> str:
+            if not folder or not os.path.isdir(folder):
+                return ""
+            # 先按当前打开的原理图文件名找（同一工程内换图纸也能对上）
+            for name in ([filename] if filename else []):
+                candidate = os.path.join(folder, name)
                 if os.path.isfile(candidate):
                     return os.path.abspath(candidate)
+            return kicad_session.find_root_schematic(folder) or ""
 
-        for d in dirs:
-            root = kicad_session.find_root_schematic(d)
-            if root:
-                return root
+        # 用户手动选过工程目录 → 先按手动选择来
+        if self._project_manual and project:
+            found = try_dir(project)
+            if found:
+                return found
+
+        # 否则以 KiCad 当前打开的工程为准，再退回界面里的目录
+        for folder in (ipc_dir, project):
+            found = try_dir(folder)
+            if found:
+                return found
+
+        for folder in (kicad_session.process_hint_dirs()
+                       + kicad_session.open_project_dirs()):
+            found = try_dir(folder)
+            if found:
+                return found
         return ""
 
     def _auto_scan(self) -> None:

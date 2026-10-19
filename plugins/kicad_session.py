@@ -38,31 +38,73 @@ def last_error() -> str:
     return _import_error or ""
 
 
-def get_open_schematic() -> Tuple[str, str]:
-    """返回 (原理图文件名, 可能为空)。"""
+def get_open_schematics() -> List[Tuple[str, str]]:
+    """返回所有打开的原理图文档 [(文件名, 工程目录), ...]。"""
     kicad = get_kicad()
     if kicad is None:
-        return "", ""
+        return []
+    result: List[Tuple[str, str]] = []
     try:
         from kipy.proto.common.types import base_types_pb2
 
         docs = kicad.get_open_documents(base_types_pb2.DocumentType.Value("DOCTYPE_SCHEMATIC"))
-        if not docs:
-            return "", ""
-        doc = docs[0]
-        filename = doc.board_filename or ""
-
-        project_dir = ""
-        try:
-            project = kicad.get_project(doc)
-            project_dir = project.path or ""
-        except Exception:
+        for doc in docs or []:
+            filename = doc.board_filename or ""
             project_dir = ""
-        return filename, project_dir
+            try:
+                project_dir = kicad.get_project(doc).path or ""
+            except Exception:
+                project_dir = ""
+            result.append((filename, project_dir))
     except Exception as exc:  # noqa: BLE001
         global _import_error
         _import_error = str(exc)
+        return []
+    return result
+
+
+def _pick_open_document(docs: List[Tuple[str, str]]) -> Tuple[str, str]:
+    """多个工程同时打开时，挑选“当前”那个。
+
+    优先看可见的原理图窗口标题里包含哪个文件名；都对不上时取最近修改的工程。
+    """
+    if not docs:
         return "", ""
+    if len(docs) == 1:
+        return docs[0]
+
+    titles: List[str] = []
+    try:
+        from kicad_ui import schematic_window_titles
+
+        titles = [t.lower() for t in schematic_window_titles()]
+    except Exception:
+        titles = []
+
+    if titles:
+        for name, project_dir in docs:
+            stem = os.path.splitext(os.path.basename(name or ""))[0].lower()
+            if stem and any(stem in title for title in titles):
+                return name, project_dir
+
+    best = docs[0]
+    best_mtime = -1.0
+    for name, project_dir in docs:
+        root = find_root_schematic(project_dir) if project_dir else ""
+        if not root:
+            continue
+        try:
+            mtime = os.path.getmtime(root)
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best, best_mtime = (name, project_dir), mtime
+    return best
+
+
+def get_open_schematic() -> Tuple[str, str]:
+    """返回 (原理图文件名, 工程目录)；多个工程时挑当前工程。"""
+    return _pick_open_document(get_open_schematics())
 
 
 # --------------------------------------------------------------------------

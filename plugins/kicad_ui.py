@@ -145,6 +145,25 @@ def _find_in_menu(hmenu, labels: Sequence[str], depth: int = 0) -> Optional[Tupl
     return None
 
 
+def schematic_window_titles() -> List[str]:
+    """当前进程可见的原理图窗口标题（用于判断当前正在编辑哪个工程）。"""
+    try:
+        pids = set(ancestor_pids())
+        windows = [w for w in enum_windows()
+                   if user32.IsWindowVisible(w.hwnd) and w.cls.lower().startswith("wxwindow")]
+        if pids:
+            windows = [w for w in windows if w.pid in pids]
+        result: List[str] = []
+        for w in windows:
+            title = w.title or ""
+            low = title.lower()
+            if ("原理图" in title or "schematic" in low or "eeschema" in low) and title:
+                result.append(title)
+        return result
+    except Exception:
+        return []
+
+
 def find_schematic_window(schematic_path: str = "") -> Optional[WindowInfo]:
     """找到当前原理图编辑器的顶层窗口。"""
     pids = set(ancestor_pids())
