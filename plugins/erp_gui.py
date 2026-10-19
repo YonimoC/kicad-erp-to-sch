@@ -577,6 +577,10 @@ class ErpToSchDialog(wx.Dialog):
                         lib_id=symbol.lib_id,
                         description=symbol.description,
                         partnumber=symbol.partnumber,
+                        fields_hidden={
+                            "Description": symbol.is_hidden("Description"),
+                            "PartNumber": symbol.is_hidden("PartNumber"),
+                        },
                     )
                     comp = analyze_component(comp, self.config)
                     self.rows.append(self._match_component(comp))
@@ -634,6 +638,9 @@ class ErpToSchDialog(wx.Dialog):
             if row.description and row.description != comp.description:
                 all_current = False
                 break
+            if not comp.hidden("PartNumber") or not comp.hidden("Description"):
+                all_current = False
+                break
         if all_current:
             row.status = "已是最新"
         elif row.status == "已是最新":
@@ -682,7 +689,8 @@ class ErpToSchDialog(wx.Dialog):
             row.note = "无可用现有料，建议新建"
 
         if (row.pn and row.pn == comp.partnumber
-                and row.description and row.description == comp.description):
+                and row.description and row.description == comp.description
+                and comp.hidden("PartNumber") and comp.hidden("Description")):
             row.status = "已是最新"
         return row
 
@@ -996,6 +1004,9 @@ class ErpToSchDialog(wx.Dialog):
                 return True
             if row.description and row.description != comp.description:
                 return True
+            # 字段会显示在原理图上 → 需要重写为隐藏
+            if not comp.hidden("PartNumber") or not comp.hidden("Description"):
+                return True
         return False
 
     def _write_file(self, path: str, entries: Sequence[Tuple[MatchRow, Component]]) -> int:
@@ -1009,10 +1020,12 @@ class ErpToSchDialog(wx.Dialog):
             if symbol is None:
                 continue
             changed = False
-            if row.pn and row.pn != symbol.get_field("PartNumber"):
+            if row.pn and (row.pn != symbol.get_field("PartNumber")
+                           or not symbol.is_hidden("PartNumber")):
                 edits.append(sch_sexpr.plan_set_property(text, symbol, "PartNumber", row.pn))
                 changed = True
-            if row.description and row.description != symbol.get_field("Description"):
+            if row.description and (row.description != symbol.get_field("Description")
+                                    or not symbol.is_hidden("Description")):
                 edits.append(sch_sexpr.plan_set_property(text, symbol, "Description", row.description))
                 changed = True
             if changed:

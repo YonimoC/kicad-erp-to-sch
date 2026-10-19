@@ -164,6 +164,8 @@ class Symbol:
     fields: Dict[str, str] = field(default_factory=dict)
     #: 属性名（原始大小写） -> (property 节点, 值字符串节点)
     props: Dict[str, Tuple[SNode, SNode]] = field(default_factory=dict)
+    #: 属性名 -> 是否已隐藏（无 hide yes 的属性会显示在原理图上）
+    hidden: Dict[str, bool] = field(default_factory=dict)
     prop_indent: str = "\t\t"
 
     # -- 便捷属性 ---------------------------------------------------------
@@ -198,6 +200,13 @@ class Symbol:
             if name in self.props:
                 return name
         return None
+
+    def is_hidden(self, canonical: str) -> bool:
+        """字段是否隐藏；字段不存在时也视为隐藏（不会显示）。"""
+        name = self.actual_field_name(canonical)
+        if name is None:
+            return True
+        return bool(self.hidden.get(name, False))
 
 
 def _line_indent(text: str, pos: int) -> str:
@@ -240,6 +249,8 @@ def read_symbols(text: str, root: Optional[SNode] = None) -> List[Symbol]:
                 name = unquote(name_node.atom or "")
                 sym.fields[name] = unquote(value_node.atom or "")
                 sym.props[name] = (sub, value_node)
+                if "(hide yes)" in text[sub.start:sub.end]:
+                    sym.hidden[name] = True
                 if first_prop is None:
                     first_prop = sub
 
@@ -268,15 +279,25 @@ class Edit:
     text: str
 
 
-def _build_property_block(name: str, value: str, indent: str) -> str:
-    """按 KiCad 10 的排版生成一个隐藏属性块。"""
+#: 这些字段写入时应始终隐藏（不显示在原理图上）
+HIDDEN_FIELDS = ("Description", "PartNumber")
+
+
+def _build_property_block(name: str, value: str, indent: str,
+                          at: str = "(at 0 0 0)",
+                          first_indent: Optional[str] = None) -> str:
+    """按 KiCad 10 的排版生成一个隐藏属性块。
+
+    `first_indent` 用于就地替换已有属性（行首缩进已存在，不能再加一遍）。
+    """
     i0 = indent
     i1 = indent + "\t"
     i2 = indent + "\t\t"
     i3 = indent + "\t\t\t"
+    head = i0 if first_indent is None else first_indent
     return (
-        f'{i0}(property "{name}" {quote(value)}\n'
-        f"{i1}(at 0 0 0)\n"
+        f'{head}(property "{name}" {quote(value)}\n'
+        f"{i1}{at}\n"
         f"{i1}(hide yes)\n"
         f"{i1}(effects\n"
         f"{i2}(font\n"
@@ -287,14 +308,26 @@ def _build_property_block(name: str, value: str, indent: str) -> str:
     )
 
 
+def _property_at(text: str, prop: SNode) -> str:
+    """返回属性里 (at ...) 子节点的原始文本。"""
+    node = prop.find("at")
+    return text[node.start:node.end] if node is not None else "(at 0 0 0)"
+
+
 def plan_set_property(text: str, symbol: Symbol, canonical: str, value: str) -> Edit:
     """生成"设置某字段"的修改。
 
-    已存在（含别名）则只替换值；不存在则在 symbol 结束前插入一个隐藏字段。
+    已存在（含别名）则替换值；若该字段应隐藏却当前可见\
+    （如 Description），则整块重写成隐藏属性。不存在则在 symbol 结束前插入隐藏字段。
     """
     name = symbol.actual_field_name(canonical)
     if name is not None:
-        _, value_node = symbol.props[name]
+        prop, value_node = symbol.props[name]
+        if canonical in HIDDEN_FIELDS and "(hide yes)" not in text[prop.start:prop.end]:
+            indent = _line_indent(text, prop.start)
+            block = _build_property_block(name, value, indent or symbol.prop_indent[:-1],
+                                          _property_at(text, prop), first_indent="")
+            return Edit(prop.start, prop.end, block)
         return Edit(value_node.start, value_node.end, quote(value))
 
     insert_at = symbol.node.end - 1  # 指向 symbol 的右括号

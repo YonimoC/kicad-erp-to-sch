@@ -17,7 +17,7 @@ FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅库存>0) > 新建 FH 新料。
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from erp_config import Config
@@ -407,6 +407,12 @@ class Component:
     tolerance: Optional[float] = None
     description: str = ""
     partnumber: str = ""
+    #: 属性是否已隐藏（False/缺失 表示会显示在原理图上）
+    fields_hidden: Dict[str, bool] = field(default_factory=dict)
+
+    def hidden(self, canonical: str) -> bool:
+        """该字段是否隐藏（缺失字段视为隐藏）。"""
+        return bool(self.fields_hidden.get(canonical, True))
 
     @property
     def label(self) -> str:
