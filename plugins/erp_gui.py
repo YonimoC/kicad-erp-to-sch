@@ -296,6 +296,77 @@ class RulesDialog(wx.Dialog):
 
 
 # --------------------------------------------------------------------------
+# 新建物料对话框（可选类别）
+# --------------------------------------------------------------------------
+class NewItemDialog(wx.Dialog):
+    """按内置参数要求表生成新料描述，类别可选、描述可编辑。"""
+
+    def __init__(self, parent: wx.Window, row: MatchRow, config: Config):
+        super().__init__(parent, title=f"生成新料描述 - {row.references}", size=(860, 460))
+        self.row = row
+        self.comp = row.comp
+        self.config = config
+
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        info = (f"位号 {row.references}    型号/数值 {self.comp.value}    "
+                f"封装 {self.comp.footprint or '-'}")
+        sizer.Add(wx.StaticText(panel, label=info), 0, wx.ALL, 10)
+
+        grid = wx.FlexGridSizer(2, 2, 8, 8)
+        grid.AddGrowableCol(1, 1)
+        grid.Add(wx.StaticText(panel, label="物料类别"), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.names = erp_rules.rule_names()
+        self.choice = wx.Choice(panel, choices=self.names)
+        suggested = erp_rules.suggest_rule_name(self.comp)
+        if suggested in self.names:
+            self.choice.SetSelection(self.names.index(suggested))
+        elif self.names:
+            self.choice.SetSelection(0)
+        grid.Add(self.choice, 1, wx.EXPAND)
+
+        grid.Add(wx.StaticText(panel, label="PartNumber"), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.txt_pn = wx.TextCtrl(panel, value=str(config.get("new_partnumber") or "（新料）"))
+        grid.Add(self.txt_pn, 1, wx.EXPAND)
+        sizer.Add(grid, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        self.hint = wx.StaticText(panel, label="")
+        sizer.Add(self.hint, 0, wx.EXPAND | wx.ALL, 10)
+
+        sizer.Add(wx.StaticText(panel, label="描述（可直接修改）"), 0, wx.LEFT, 10)
+        self.txt_desc = wx.TextCtrl(panel, style=wx.TE_MULTILINE, size=(-1, 110))
+        sizer.Add(self.txt_desc, 1, wx.EXPAND | wx.ALL, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        buttons.AddStretchSpacer()
+        self.btn_cancel = wx.Button(panel, wx.ID_CANCEL, "取消")
+        self.btn_ok = wx.Button(panel, wx.ID_OK, "使用")
+        buttons.Add(self.btn_cancel, 0, wx.RIGHT, 8)
+        buttons.Add(self.btn_ok, 0)
+        sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
+
+        panel.SetSizer(sizer)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(outer)
+
+        self.choice.Bind(wx.EVT_CHOICE, lambda e: self._regenerate())
+        self._regenerate()
+
+    def _regenerate(self) -> None:
+        name = self.choice.GetStringSelection()
+        rule = erp_rules.find_rule(name)
+        if rule:
+            self.hint.SetLabel(f"参数顺序：{rule.get('order', '')}\n示例：{rule.get('example', '')}")
+        self.hint.Wrap(760)
+        self.txt_desc.SetValue(erp_rules.build_description(name, self.comp, self.config))
+
+    def values(self) -> Tuple[str, str]:
+        return self.txt_pn.GetValue().strip(), self.txt_desc.GetValue().strip()
+
+
+# --------------------------------------------------------------------------
 # 主对话框
 # --------------------------------------------------------------------------
 class ErpToSchDialog(wx.Dialog):
@@ -710,7 +781,7 @@ class ErpToSchDialog(wx.Dialog):
         menu = wx.Menu()
         item_search = menu.Append(wx.ID_ANY, "搜索 ERP 物料…")
         item_candidate = menu.Append(wx.ID_ANY, "查看候选物料…")
-        item_new = menu.Append(wx.ID_ANY, "生成新料描述（（新料）/ FH）")
+        item_new = menu.Append(wx.ID_ANY, "生成新料描述…（可选类别）")
         item_manual = menu.Append(wx.ID_ANY, "手动输入 PartNumber / 描述…")
         item_clear = menu.Append(wx.ID_ANY, "清除 PartNumber / 描述")
         menu.AppendSeparator()
@@ -728,12 +799,17 @@ class ErpToSchDialog(wx.Dialog):
         row = self._selected_row()
         if row is None:
             return
-        pn, description = build_new_item(row.comp, self.config)
+        with NewItemDialog(self, row, self.config) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            pn, description = dlg.values()
+        if not pn:
+            pn = str(self.config.get("new_partnumber") or "（新料）")
         row.selected = None
         row.pn = pn
         row.description = description
         row.status = "手动"
-        row.note = "已按规则生成新料描述"
+        row.note = "按参数要求表生成"
         self._refresh_list()
         self._log(f"{row.references}: 生成新料 {pn} / {description}")
 

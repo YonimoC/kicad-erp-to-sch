@@ -1,0 +1,852 @@
+[
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "AC电源连接线",
+  "separate_smd_tht": "",
+  "order": "料号名称、长度、线号、芯数,芯颜色、各端口的端子头或剥皮上锡描述、颜色、印字描述、特殊定制的材质(如硅胶, 铁氟龙)或其它描述(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "欧规电源线,2.5m 0.75mm2, 2芯,红/黑,A端JT01型插头,B端剥皮上锡5mm,白色,有印字"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "DC连接线",
+  "separate_smd_tht": "",
+  "order": "料号名称、长度、线号、芯数、芯颜色、各端口的端子头或剥皮上锡描述、是否抗UV、印字描述、特殊定制的材质(如硅胶, 铁氟龙)或其它描述(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "DC连接线,5m,UL2464 22AWG,2芯,红/黑,A端DC5521公头,B端沾锡5mm,黑色,抗UV,有印字,寄太阳能板供应商焊接加工"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "FPC排线",
+  "separate_smd_tht": "",
+  "order": "料号名称、长度、芯数、间距、同向或反向、特殊定制的描述(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "FPC排线，50mm,16芯，1.0mm间距，同向"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "IC类",
+  "separate_smd_tht": "",
+  "order": "料号名称、IC类型、型号、尺寸、工作电压、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片集成电路,模拟开关,CH443K,SC-70-6(SOT-363),2.1~5.5V,WCH"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "MCU单片机",
+  "separate_smd_tht": "",
+  "order": "料号名称、8位或32位、型号、尺寸、flash或otp内存容量、RAM容量、工作电压、品牌、是否供应商烧录(同哪个料号)、烧录校验码(如非供应商烧录可省略)、专用用途的描述可省缺(如蓝牙)",
+  "loss": "0",
+  "note": "",
+  "example": "贴片MCU,32位,PY32F002AF15P6TU-E,TSSOP-20,Flash:20K,RAM:3K ,PUYA,同107010394,供应商烧录,校验码xxxxxx"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "PCB",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号版本、材质、单/双/四层板、PCB尺寸、PCB板厚度、阻焊&字符颜色（油墨丝印颜色）、表面焊盘喷镀（焊盘处理工艺）、拼板数量、（铜箔厚度(如为常规1Oz盎司可省略)F\n^_x0005__x0001_",
+  "loss": "0",
+  "note": "",
+  "example": "PCB板,EL5540K1-V1.0,双层,FR4,30*17*1.0mm,拼板:6x6.绿油白字,无铅喷锡"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "USB连接线",
+  "separate_smd_tht": "",
+  "order": "料号名称、一拖几(1拖1可省缺),长度(如是一拖多需分别描述)、线号、各端口的端子头或剥皮上锡描述、颜色、特殊定制的材质(如硅胶, 铁氟龙)或其它描述(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "USB连接线,一拖三,300mm,A端100mm,B端200mm,A端 N70小头/Micro USB/Mini USB ,B端USB-A型公头,黑色"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "安规电容",
+  "separate_smd_tht": "",
+  "order": "料号名称、容值、耐压、误差、材质、尺寸、脚距、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "X2安规电容,0.33uF,275V,±10%,18*14.5*8.5mm,脚距15mm,插件,TENTA"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "保险丝",
+  "separate_smd_tht": "",
+  "order": "料号名称、电流、耐压、误差、尺寸、熔断速度、有无引脚、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "可拔插玻璃管保险丝,5A,250V,5*20mm,慢熔,无引脚,,Better"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "变压器",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、误差、耐压、特殊定制(如硅胶, (可省缺),品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件变压器,EF2503-1.3mH,±10%,耐压≥3600V，引脚加绝缘套管,"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "拨动开关",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、柄长、几刀几掷、卧式或者立式,电流,品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件拨动开关,SS1202C2-W2B20-D20N-TY1-H,8.8×7.5×4.4mm,柄长2.0×2.0×2.0mm,单刀双掷,卧式,0.3A,新龙"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件场效应管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、N或P沟道、耐压、额定电流、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件MOS管，SVF10N65F,TO-220F-3L,N型，650V,10A,士兰微"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件电感",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、感值、误差、额定电流、直插或者卧插,品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件磁环电感，044125,22uH，±20%，8A,卧式插件,普罗德"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件电解电容",
+  "separate_smd_tht": "",
+  "order": "料号名称、容值、耐压、误差、尺寸、引脚间距(插件需要增加引脚间距 F=2.5)、工作温度、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件电解电容,WH100uF,25V,±20%,6.3*11mm,F=2.5mm,-40~+105℃,2000H,AiSHi"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件电容",
+  "separate_smd_tht": "",
+  "order": "料号名称、容值、耐压、误差、材质、脚距,品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件高压瓷片电容,1.0nF,1KV,±20%,Y5V,脚距5mm,JNC"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、阻值、误差、功率、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件金属膜电阻,100KΩ,±1%,1W,3.0*10mm,JH"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件发光二极管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、颜色、电压、电流、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件发光二极管,G504DC,绿发翠绿光,φ5mm,卓越微"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件共模电感",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、线径或电流、感值、材质、立式卧式、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件共模电感,T6*3*3,φ0.35mm*5T,L≥100uH,立式,鑫磁"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件三极管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、NPN或PNP、耐压、电流,品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件三极管,D44VH10G,TO-220,NPN,80V,15A,onsemi"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件水泥电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、阻值、误差、功率、卧式立式,品牌",
+  "loss": "0",
+  "note": "",
+  "example": "水泥电阻,48*10*10,10Ω,±5%,10W,卧式,YAGEO"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "船型开关",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、电流、耐压、几刀几掷",
+  "loss": "0",
+  "note": "",
+  "example": "船型开关,KCD1-104-4P,6A.250V/10A.125V，单刀单掷"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "电池",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、容量、串并联方式、电压、连接线的描述,带不带保护板",
+  "loss": "0",
+  "note": "",
+  "example": "磷酸铁锂电池组,IFR26650,4000mAh,4S1P,12.8V,UL3135/14AWG红黑硅胶引线,带XT30公壳母端,线长:150±10mm(不含端子),有保护板"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "电机、马达",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、电压,串并联方式、电压、连接线的描述(如无线材可省缺),转速,颜色(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "直流无刷马达,JZD16GM-0523E,16mm*16mm*54.2mm,9V, 出线长度110mm，PVC线材AWG26，带ZH1.5-4PIN，空载转速-235±10%,黑色"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "电源控制IC",
+  "separate_smd_tht": "",
+  "order": "料号名称、类型,型号、尺寸、电压,电流,外置mos管(内置可省略),品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片电源IC，同步降压,MT2492,SOT-23-6,4.5~16V,2A,AEROSEMI"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "光耦",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片光耦,UPC817DG-C04-R,SMD-4,UTC"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "继电器",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、电压、常开常闭、尺寸、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "继电器,JQC-3FF/012-1HS(136),12V,常开,19*15.2*15.5mm,插件,金天"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "金属膜电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、阻值、误差、功率、尺寸、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "金属膜电阻,100KΩ,1W,±1%,3.0*10mm,插件,JH"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片晶振",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、频率、负载电容、误差、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片晶振,7U24.000E12UCG,24MHz,12PF,±10PPM,2.5×3.2mm,川晶科技"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "插件晶振",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、频率、负载电容、误差、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "音叉型晶振,DT-38,32.768KHz,12.5PF 20ppm,插件,KDS大真空"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "开关电源",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、电压、电流、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "开关电源,HS35-24,DC24V1.5A,84*58*38mm,xx"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "可调电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、阻值、误差、功率、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "可调电阻,3362P-1-103,10kΩ,±10%,0.5W,插件,BOCHEN"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "可控硅",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、单双向、电压、电流、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件可控硅,BTA16-600BWRG,双向,600V,16A,ST"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "USB连接器",
+  "separate_smd_tht": "",
+  "order": "料号名称、料号详细（如果有防水需要加上描述 USBA防水插座）、型号、高度、方向（直插、卧插、直贴、沉板式灯）、材质、品牌   \nUSB类型定义：Type-C、Mini/Micro USB、Type-A/B、Type-C",
+  "loss": "0",
+  "note": "",
+  "example": "USB插座,USB-A插座,USB2.0AF-EEP1-01T(HLW),7mm,直插,铜壳镀镍,XUNPU(讯普)"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "DC座、针座类型",
+  "separate_smd_tht": "",
+  "order": "（贴片、插件）料号名称、型号（如果有防水需要加上描述防水）、高度、电压、方向（直插、卧插、直贴、沉板式灯）、材质、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "插件DC插座,防水型EZ-DS-0317D20,10mm,直插、XUNPU(讯普)\n贴片插座,XH2.5*2Pin,2.5mm,卧贴，(A2501AWR-02-F1CA-R)健坤"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "轻触开关",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、克重、尺寸、塑头铜头硅胶头、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片轻触开关,TS-1233H2.0-160G,3.3×3.3×H2.0mm,塑头,和泰宝"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "热敏电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、尺寸、阻值、误差、NTC、脚距(贴片可省缺)、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "热敏电阻,MF11-104M,5D-11,100KΩ,±20%,NTC,脚距2.0mm,插件,荣华"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "适配器",
+  "separate_smd_tht": "",
+  "order": "料号名称、认证(可省缺)、工作电压、输出电压/电流/输出端口型号、线长,颜色",
+  "loss": "0",
+  "note": "",
+  "example": "电源适配器 CE,IN:100~240V,OU:12VDC/1.5A/USB,线长1.5m,黑色"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "碳膜电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、阻值、误差、功率、尺寸、贴片插件、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "碳膜电阻,39Ω,±5%,2W,5*15.5mm,插件,XX"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片场效应管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、N或P沟道、耐压、额定电流、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片MOS管,2N7002,N沟道, 60V,115mA,SOT-23,JSMSEMI(杰盛微)"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片磁珠",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、感抗、误差、尺寸、品牌",
+  "loss": "0.003",
+  "note": "",
+  "example": "贴片磁珠,UPZ2012U221-3R0TF,220Ω,±25%,0805,SL"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片电感",
+  "separate_smd_tht": "",
+  "order": "料号名称、电感值、尺寸、误差额定电流，品牌（厂家料号）",
+  "loss": "依尺寸",
+  "note": "",
+  "example": "贴片电感,4.7UH,±30%,5.0*5.0*4.0mm, 3A,Sunlord(SWPA5040S4R7NT）"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片电解电容",
+  "separate_smd_tht": "",
+  "order": "料号名称、容值、耐压、误差、尺寸、工作温度、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片电解电容,1000uF,10V,±20%,10*10.5mm,-40~+105℃,Chang"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片电容",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、容值、误差、材质、耐压、品牌",
+  "loss": "0.003",
+  "note": "",
+  "example": "贴片电容,0603,100nF,50V,±10%,X7R,SAMSUNG"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、阻值、误差、功率、品牌",
+  "loss": "0.003",
+  "note": "阻值小于1Ω的电阻,以Ω为单位, 如10mΩ用0.01Ω表示, 以防和MΩ混淆",
+  "example": "贴片电阻,0603,680Ω,±1%,1/10W,SUP"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片二极管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、反向耐压(Vr)、整流电流、尺寸、品牌",
+  "loss": "0.003",
+  "note": "",
+  "example": "贴片二极管,SS14,40V,1A,,SOD-123,KUU"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片共模电感",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、线路数、电流、额定电压、阻抗、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片共模滤波器,YLM7060-272T,线路数: 2,额定电流: 1A,直流额定电压(VDC): 125V,阻抗 @ 频率: 2.7kΩ@100Mhz,SMD,7x6x3.8mm,YJYCOIN(益嘉源)"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "贴片三极管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、晶体管类型、集电极电流(Ic)、集射极击穿电压(Vceo)、尺寸、品牌",
+  "loss": "0.003",
+  "note": "",
+  "example": "贴片三极管,LBSS4240LT1G,NPN,2A,40V,SOT-23,LRC(乐山无线电)"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "蜂鸣器",
+  "separate_smd_tht": "",
+  "order": "插件/贴片,蜂鸣器类型(有源、无源、压电式等),供应商规格型号，电压、分贝、尺寸，供应商名称",
+  "loss": "0",
+  "note": "",
+  "example": "贴片蜂鸣器,有源,ST-0502,4000Hz,75dB,3V,5.2×5.2×2mm,Soberton Inc."
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "稳压IC",
+  "separate_smd_tht": "",
+  "order": "料号名称、类型,型号、尺寸、工作电压、输出电压、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片电源IC，LDO,SG1301B33M,SOT23-5,2.5~18V,输出3.3V,S&G"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "稳压二极管",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、电压、精度、尺寸、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "贴片稳压二极管,MM1Z5V1BW,5.1V,2%,SOD-123,JF"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "显示屏",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、颜色、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "OLED显示屏,0.95寸 RGB,中景园电子"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "旋钮开关",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、材质、表面处理(可省缺)、颜色、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "旋钮开关，长宽高：12mm*12mm*14.5mm；材质：铝；表面处理：拉丝；本色，SR料号：020113190102(供应商为SR)"
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "压敏电阻",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、耐压、精度、脚距、贴片插、件品牌",
+  "loss": "0",
+  "note": "",
+  "example": "压敏电阻,ZOV-10D561K,560V,±10%,脚距7.5mm,插件,ZOV"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "包装袋",
+  "separate_smd_tht": "",
+  "order": "包装袋类型、材质、尺寸、其他",
+  "loss": "0",
+  "note": "",
+  "example": "PE袋,160mm（开口）×240mm×8C（双层）,自封"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "彩盒类",
+  "separate_smd_tht": "",
+  "order": "机型+彩盒、尺寸、材质、表面覆膜（光膜or哑膜）、其他",
+  "loss": "0",
+  "note": "",
+  "example": "JB2301彩盒(jOBEL)，248 *142.5 *68.5mm，250G灰底白+130G高强(E瓦)+210G牛卡，覆哑膜"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "防护网",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、规格",
+  "loss": "0",
+  "note": "",
+  "example": "平柜防护网,2.3×2.3m,150×150mm网格,4m四股绳"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "隔板类",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、材质",
+  "loss": "0",
+  "note": "",
+  "example": "隔板,710*330mm,牛卡B瓦"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "护角",
+  "separate_smd_tht": "",
+  "order": "护角类型（材质类型）、尺寸、其他",
+  "loss": "0",
+  "note": "",
+  "example": "纸护角,5cm*5cm*13cm,直角"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "捆扎膜",
+  "separate_smd_tht": "",
+  "order": "料号名称、颜色、尺寸、重量",
+  "loss": "0",
+  "note": "",
+  "example": "捆扎膜,黑色,0.5×510m,4.5kg"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "说明书",
+  "separate_smd_tht": "",
+  "order": "机型+说明书、版本、语言种类、尺寸、材质、印刷要求、成品样式",
+  "loss": "0",
+  "note": "",
+  "example": "Sunturtle 说明书,V1.0,英文,240*160mm,100g双胶,双面印刷,折成品"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "包装物料",
+  "name": "外箱类",
+  "separate_smd_tht": "",
+  "order": "机型+外箱、尺寸、材质",
+  "loss": "0",
+  "note": "",
+  "example": "Sunbell外箱,770×340×325mm,牛卡BC瓦"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "电子物料",
+  "name": "太阳能硅板",
+  "separate_smd_tht": "",
+  "order": "料号名称、单晶多晶、玻璃或（PET\\ETFE\\布包）等,工作电压,功率,尺寸,线材长度(不带线可省缺),线号(不带线可省缺),输出端口(不带线可省缺),其它如标签描述(可省缺)",
+  "loss": "0",
+  "note": "",
+  "example": "太阳能硅板,多晶硅,低铁透明玻璃,18V,10W,340*285*18mm，太阳能板标签的印刷内容按批次提供(订单号由业务提供）"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "打包带",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、规格",
+  "loss": "0",
+  "note": "",
+  "example": "打包带,15mm,800m,10kg/卷"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "导热胶",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、规格、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "导热胶,ES-810,白色膏状,120g/管"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "防水漆",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、状态、品牌、规格",
+  "loss": "0",
+  "note": "",
+  "example": "防水漆，GT-2087，透明淡黄色液体，捷美特"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "干燥剂",
+  "separate_smd_tht": "",
+  "order": "料号名称、规格",
+  "loss": "0",
+  "note": "",
+  "example": "硅胶干燥剂,2G,白色透明颗粒,袋装 [SR提供]（同408000002）"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "焊锡类",
+  "separate_smd_tht": "",
+  "order": "料号名称、规格",
+  "loss": "0",
+  "note": "",
+  "example": "日本广崎不锈钢无铅焊锡丝，1.0mm，Sn 99.3%，Cu 0.7%，450g/卷"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "密封胶",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、状态、规格",
+  "loss": "0",
+  "note": "",
+  "example": "快速粘接密封胶,OPUTE-7526,透明半流淌,300mL/支"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "润滑油",
+  "separate_smd_tht": "",
+  "order": "润滑油类型、型号、规格、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "JUKI贴片机保养润滑油？"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "瞬干胶",
+  "separate_smd_tht": "",
+  "order": "料号名称、型号、规格、品牌",
+  "loss": "0",
+  "note": "",
+  "example": "瞬干胶,AN-460,透明,20g/瓶"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "透明胶带",
+  "separate_smd_tht": "",
+  "order": "胶带类型、尺寸、规格",
+  "loss": "0",
+  "note": "",
+  "example": "美纹胶,45mm,20码/卷"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "辅材",
+  "name": "栈板",
+  "separate_smd_tht": "",
+  "order": "栈板类型、尺寸、其他",
+  "loss": "0",
+  "note": "",
+  "example": "塑料栈板,120*80*14cm,蓝色,田字形"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "结构物料",
+  "name": "标签类",
+  "separate_smd_tht": "",
+  "order": "机型+标签类别、尺寸、材质、其他",
+  "loss": "0",
+  "note": "",
+  "example": "Sunbell PAYG 外箱标签,80*30mm,铜版纸,不干胶"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "结构物料",
+  "name": "不干胶",
+  "separate_smd_tht": "",
+  "order": "↑",
+  "loss": "0",
+  "note": "",
+  "example": ""
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "结构物料",
+  "name": "吸塑盒",
+  "separate_smd_tht": "",
+  "order": "吸塑盒、（机型名称）、内、外尺寸规格、材质、放置格数、供应商、(使用客户)",
+  "loss": "0",
+  "note": "",
+  "example": "吸塑盒,MIC L/R,外尺寸330*290*14mm,内尺寸23*9.5*11mm,材质:PET透明放静电90C,150格,[LC]"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "结构物料",
+  "name": "塑胶件",
+  "separate_smd_tht": "",
+  "order": "料号名称、材质、颜色、表面处理",
+  "loss": "0",
+  "note": "",
+  "example": "外壳，ABS(黑），外观喷漆+文字印刷"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "五金件",
+  "name": "垫片",
+  "separate_smd_tht": "",
+  "order": "垫片类型、尺寸、材质",
+  "loss": "0",
+  "note": "",
+  "example": "弹垫,Ф3*1mm,铁镀亮镍"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "五金件",
+  "name": "螺钉",
+  "separate_smd_tht": "",
+  "order": "螺钉类型、尺寸、材质",
+  "loss": "0",
+  "note": "",
+  "example": "铁钉，长度2cm，直径1.5mm，不锈钢"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "五金件",
+  "name": "螺母",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、材质",
+  "loss": "0",
+  "note": "",
+  "example": "螺母,M2*4*1.6mm,铁镀亮镍"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "五金件",
+  "name": "螺丝",
+  "separate_smd_tht": "",
+  "order": "料号名称、尺寸、规格：槽型+头型+螺纹类型+尾部形状、材质",
+  "loss": "",
+  "note": "",
+  "example": "螺丝,M3×6mm,PA小头（头部直径5mm)十字圆头自攻尖尾,不锈铁，本色"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "线材",
+  "name": "连接线",
+  "separate_smd_tht": "",
+  "order": "料号名称、线长、UL号(无特殊要求可省缺)、芯数、颜色,材质(无特殊要求可省缺),耐温(无特殊要求可省缺),两端的端子头或剥线描述",
+  "loss": "0",
+  "note": "",
+  "example": "连接线,65mm,UL1015 20AWG,单芯,棕色,PVC ,105℃,A端187型母端子,B端镀锡5mm"
+ },
+ {
+  "category": "模具",
+  "subcategory": "工装仪器类",
+  "name": "钢网",
+  "separate_smd_tht": "无",
+  "order": "PCB钢网，机型号（BOT&TOP）,尺寸*厚度，（代工客户简码）",
+  "loss": "0",
+  "note": "EC自有产品不需要代工客户码的标识",
+  "example": ""
+ },
+ {
+  "category": "电子物料",
+  "subcategory": "电子物料",
+  "name": "针座",
+  "separate_smd_tht": "",
+  "order": "贴片针座/插件针座、尺寸、型号、（单排直插、单排卧插）、供应商",
+  "loss": "0",
+  "note": "",
+  "example": "插件针座,2.54mm×2pin,XH-2AWD,单排卧插(XH-2A、XH-2AW、XH-2AWD)"
+ },
+ {
+  "category": "成品",
+  "subcategory": "\\",
+  "name": "成品",
+  "separate_smd_tht": "",
+  "order": "颜色,电池型号,容量,硅板参数(耐压瓦数),灯珠参数K,版本,特殊丝印信息,特殊芯片信息",
+  "loss": "0",
+  "note": "",
+  "example": "蓝色,18650,1500mAh,4V1.75W,4000K,RevV1.0,丝印UNHCR,合泰芯片"
+ },
+ {
+  "category": "结构物料",
+  "subcategory": "模具",
+  "name": "模具",
+  "separate_smd_tht": "",
+  "order": "产品机型、部品编码、穴数、模具材质（非必要项）、模具生产次数、物料材质",
+  "loss": "0",
+  "note": "",
+  "example": ""
+ }
+]

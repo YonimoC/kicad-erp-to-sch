@@ -67,6 +67,9 @@ KIND_LABELS = {
 #: 插件封装前缀（第一版只匹配贴片）
 THT_PACKAGES = ("DIP-", "TO-92", "TO-126", "TO-220", "TO-247", "TO-3")
 
+#: 库名/封装名里出现这些字样也按插件处理
+THT_HINTS = ("THT", "THROUGHHOLE", "PINHEADER", "PINSOCKET", "TERMINALBLOCK", "HC49")
+
 
 def is_tht_footprint(footprint: str) -> bool:
     """判断是否为插件（THT）封装。"""
@@ -74,11 +77,11 @@ def is_tht_footprint(footprint: str) -> bool:
     if not footprint:
         return False
     library, _, name = footprint.partition(":")
-    library_low = library.lower()
+    library_upper = library.upper()
     name_upper = name.upper()
-    if any(k in library_low for k in ("tht", "throughhole")):
+    if "DIP" in library_upper or "DIP" in name_upper:
         return True
-    if "DIP" in library.upper():
+    if any(k in library_upper or k in name_upper for k in THT_HINTS):
         return True
     return name_upper.startswith(THT_PACKAGES)
 
@@ -663,7 +666,17 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         parts = ["贴片MOS管", comp.model, package]
         return pn, ",".join([p for p in parts if p])
 
-    # 未自动匹配的类型（LED / 连接器 / 开关…）：按"名称,型号,封装"生成，不写品牌
+    # 未自动匹配/其它类别：按内置《物料参数要求表》生成，类别可猜（界面里也能改）
+    try:
+        import erp_rules
+
+        rule_name = erp_rules.suggest_rule_name(comp)
+        description = erp_rules.build_description(rule_name, comp, config)
+        if description:
+            return pn, description
+    except Exception:
+        pass
+
     parts = [guess_category_name(comp), comp.model or comp.value, package]
     return pn, ",".join([p for p in parts if p])
 
