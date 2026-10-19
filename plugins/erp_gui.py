@@ -697,7 +697,9 @@ class ErpToSchDialog(wx.Dialog):
             item.SetWidth(self._column_widths[idx])
             self.list.SetColumn(idx, item)
 
-    def _refresh_list(self) -> None:
+    def _refresh_list(self, keep_view: bool = True) -> None:
+        top = self.list.GetTopItem()
+        selected = self.list.GetFirstSelected()
         self._update_headers()
         self.list.DeleteAllItems()
         for idx, row in enumerate(self.rows):
@@ -720,6 +722,16 @@ class ErpToSchDialog(wx.Dialog):
             elif row.status in ("未自动匹配", "缺少封装", "无法识别数值",
                                 "缺少型号", "插件件跳过", "待处理"):
                 self.list.SetItemTextColour(idx, wx.Colour(120, 120, 120))
+
+        # 保持滚动位置与选中行，避免编辑后跳回顶部
+        if keep_view and self.rows:
+            last = len(self.rows) - 1
+            selected = min(max(selected, 0), last)
+            self.list.Select(selected)
+            self.list.Focus(selected)
+            if 0 <= top <= last:
+                self.list.EnsureVisible(top)
+            self.list.EnsureVisible(selected)
 
     # -- 排序 -------------------------------------------------------------
     @staticmethod
