@@ -17,6 +17,7 @@ FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅库存>0) > 新建 FH 新料。
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -383,6 +384,15 @@ def normalize_model(text: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", (text or "").upper())
 
 
+def search_normalize(text: str) -> str:
+    """搜索用归一化：全角→半角，欧姆/微符号统一，再转大写。"""
+    raw = unicodedata.normalize("NFKC", text or "")
+    raw = raw.replace("\u2126", "\u03a9")            # 欧姆符号 → 希腊大写 Ω
+    raw = raw.replace("\u00b5", "\u03bc")            # 微符号 → 希腊小写 μ
+    raw = raw.replace("\u03c9", "\u03a9").replace("\u03bc", "\u03bc")
+    return raw.upper()
+
+
 def _looks_like_model(token: str) -> bool:
     t = (token or "").strip()
     if len(t) < 4 or len(t) > 40:
@@ -515,15 +525,27 @@ def parse_material(material: Material, config: Config) -> ParsedMaterial:
     parsed.tolerance = parse_tolerance(material.spec)
 
     if parsed.kind == "R":
-        parsed.value = parse_resistance(material.spec) or parse_resistance(material.name)
+        value = parse_resistance(material.spec)
+        if value is None:
+            value = parse_resistance(material.name)
+        parsed.value = value
         parsed.power = parse_power(material.spec)
-    if parsed.kind in ("X", "XO"):
-        parsed.value = parse_frequency(material.spec) or parse_frequency(material.name)
+    elif parsed.kind in ("X", "XO"):
+        value = parse_frequency(material.spec)
+        if value is None:
+            value = parse_frequency(material.name)
+        parsed.value = value
     elif parsed.kind == "L":
-        parsed.value = parse_inductance(material.spec) or parse_inductance(material.name)
+        value = parse_inductance(material.spec)
+        if value is None:
+            value = parse_inductance(material.name)
+        parsed.value = value
         parsed.current = parse_current(material.spec)
     elif parsed.kind == "C":
-        parsed.value = parse_capacitance(material.spec)
+        value = parse_capacitance(material.spec)
+        if value is None:
+            value = parse_capacitance(material.name)
+        parsed.value = value
         parsed.voltage = parse_voltage(material.spec)
         parsed.dielectric = parse_dielectric(material.spec)
     elif parsed.kind in ("D", "IC", "Q", "MOS"):
