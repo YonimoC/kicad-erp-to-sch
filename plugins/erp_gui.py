@@ -34,6 +34,29 @@ from erp_match import (
 
 APP_TITLE = "ERP 物料匹配（PartNumber / Description）"
 
+#: 版本号（发版时同步 metadata.json）
+APP_VERSION = "1.0.6"
+
+
+def _plugin_version() -> str:
+    """优先读包根目录的 metadata.json，读不到就用内置常量。"""
+    try:
+        import json
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        for rel in ("../metadata.json", "metadata.json"):
+            path = os.path.normpath(os.path.join(here, rel))
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8-sig") as fp:
+                    data = json.load(fp)
+                return str(data["versions"][0]["version"])
+    except Exception:
+        pass
+    return APP_VERSION
+
+
+APP_TITLE = f"ERP 物料匹配（PartNumber / Description） v{_plugin_version()}"
+
 
 @dataclass
 class MatchRow:

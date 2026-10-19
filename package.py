@@ -95,6 +95,27 @@ def install_to_pcm_cache(output_zip: Path):
             print(f"  ✓ 已复制到: {dest}")
 
 
+def deploy_to_thirdparty(source_dir: Path) -> None:
+    """把插件文件直接部署到 KiCad 实际加载的 3rdparty 目录（本地调试用）。"""
+    home = Path.home()
+    target_name = "com_github_YonimoC_kicad-erp-to-sch"
+    for ver in ("10.0", "11.0"):
+        base = home / "Documents" / "KiCad" / ver
+        if not base.is_dir():
+            continue
+        target = base / "3rdparty" / "plugins" / target_name
+        target.mkdir(parents=True, exist_ok=True)
+        for item in (source_dir / "plugins").iterdir():
+            if item.name == "__pycache__":
+                continue
+            dest = target / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                shutil.copyfile(item, dest)
+        print(f"  ✓ 已部署到: {target}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="打包 KiCad PCM 插件")
     parser.add_argument("--install", action="store_true",
@@ -112,6 +133,7 @@ def main():
 
     if args.install:
         install_to_pcm_cache(output_zip)
+        deploy_to_thirdparty(script_dir)
 
     print("\n★ 在 KiCad 中安装：")
     print(f"   PCM → 从文件安装... → 选择: {output_zip}")
