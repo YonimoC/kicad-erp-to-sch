@@ -624,19 +624,16 @@ class ErpToSchDialog(wx.Dialog):
 
     def _on_path_changed(self) -> None:
         self.config.set("erp_file", self.txt_erp.GetValue().strip())
-        self.config.set("last_project_dir", self.txt_project.GetValue().strip())
         self.config.save()
 
     def _detect_project(self) -> None:
-        """自动定位当前工程：以 KiCad 当前打开的原理图为准，不再沿用上次的。"""
+        """每次都重新从 KiCad 取当前工程（不保存、不沿用上次）。"""
         filename, project_dir = kicad_session.get_open_schematic()
         detected = ""
         if project_dir and os.path.isdir(project_dir):
             detected = os.path.abspath(project_dir)
         elif filename:
-            path = kicad_session.find_schematic(
-                filename, [self.config.get("last_project_dir") or "",
-                           self.txt_project.GetValue().strip() or ""])
+            path = kicad_session.find_schematic(filename)
             if path:
                 detected = os.path.dirname(path)
         if not detected:
@@ -647,17 +644,12 @@ class ErpToSchDialog(wx.Dialog):
                     detected = os.path.dirname(root)
                     break
 
-        current = self.txt_project.GetValue().strip()
         if detected:
-            if os.path.normcase(current) != os.path.normcase(detected):
-                self.txt_project.SetValue(detected)
-            self.config.set("last_project_dir", detected)
-            self.config.save()
+            self.txt_project.SetValue(detected)
             self._log(f"工程目录: {detected}")
-        elif current:
-            self._log(f"未检测到当前工程，沿用上次: {current}")
         else:
-            self._log("未自动检测到工程目录（扫描时会再尝试一次）。")
+            self.txt_project.SetValue("")
+            self._log("未检测到当前打开的工程（请确认已在 KiCad 中打开原理图）。")
 
     def _load_data(self, verbose: bool = True, force: bool = False) -> None:
         erp = self.txt_erp.GetValue().strip()

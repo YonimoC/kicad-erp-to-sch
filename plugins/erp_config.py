@@ -21,7 +21,6 @@ DEFAULT_ERP_FILE = r"D:\_LWH\KiCad Lib\Addons\ERP-To-SCH\原材料基础数据 c
 
 DEFAULTS: Dict[str, Any] = {
     "erp_file": DEFAULT_ERP_FILE,
-    "last_project_dir": "",
 
     # 品牌优选顺序（越小越优先）。国巨 = YAGEO，写成两种别名都认。
     "preferred_brands": ["FH", "厚声", "YAGEO", "国巨"],
