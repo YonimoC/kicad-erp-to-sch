@@ -417,7 +417,6 @@ class ErpToSchDialog(wx.Dialog):
         self.btn_pick = wx.Button(panel, label="选择候选…")
         self.btn_search = wx.Button(panel, label="搜索物料…")
         self.btn_rules = wx.Button(panel, label="参数要求…")
-        self.btn_apply = wx.Button(panel, label="写入原理图")
         for button in (self.btn_reload, self.btn_scan, self.btn_pick,
                        self.btn_search, self.btn_rules):
             tools.Add(button, 0, wx.RIGHT, 8)
@@ -624,7 +623,7 @@ class ErpToSchDialog(wx.Dialog):
 
     def _group_key(self, comp: Component) -> Tuple[str, str, str, str]:
         """分组依据：类别 + 数值/型号 + 容差 + 封装。"""
-        if comp.kind in ("R", "C", "L", "X") and comp.value_num is not None:
+        if comp.kind in ("R", "C", "L", "X", "XO") and comp.value_num is not None:
             value = f"{comp.kind}{comp.value_num:.6g}"
             if comp.kind == "L" and comp.current:
                 value += f"/{comp.current:g}A"
@@ -656,6 +655,11 @@ class ErpToSchDialog(wx.Dialog):
     def _match_component(self, comp: Component) -> MatchRow:
         row = MatchRow(comp=comp)
 
+        if comp.do_not_place:
+            row.status = "不上件跳过"
+            row.note = "Value 为 NC/DNP，不上件"
+            return row
+
         if not comp.kind:
             # 连接器 / 开关 / 晶振等未分类元件：按型号在物料表里找（区分贴片/插件）
             row.candidates = build_generic_candidates(comp, self.config, self.parsed_materials)
@@ -677,7 +681,7 @@ class ErpToSchDialog(wx.Dialog):
             row.note = "无法从 Footprint 识别尺寸"
             return row
 
-        if comp.kind in ("R", "C", "L", "X") and comp.value_num is None:
+        if comp.kind in ("R", "C", "L", "X", "XO") and comp.value_num is None:
             row.status = "无法识别数值"
             row.note = f"Value={comp.value}"
             return row
@@ -741,7 +745,7 @@ class ErpToSchDialog(wx.Dialog):
             elif row.status == "手动":
                 self.list.SetItemTextColour(idx, wx.Colour(0, 70, 180))
             elif row.status in ("未自动匹配", "缺少封装", "无法识别数值",
-                                "缺少型号", "插件件跳过", "待处理"):
+                                "缺少型号", "插件件跳过", "不上件跳过", "待处理"):
                 self.list.SetItemTextColour(idx, wx.Colour(120, 120, 120))
 
         # 保持滚动位置与选中行，避免编辑后跳回顶部

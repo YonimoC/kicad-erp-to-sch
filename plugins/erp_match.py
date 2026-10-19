@@ -74,6 +74,7 @@ KIND_LABELS = {
     "C": "电容",
     "L": "电感",
     "X": "晶振",
+    "XO": "有源晶振",
     "D": "二极管",
     "IC": "芯片",
     "Q": "三极管",
@@ -352,6 +353,8 @@ def parse_dielectric(text: str) -> str:
 
 
 def format_resistance(value: float) -> str:
+    if value == 0:
+        return "0Ω"
     if value >= 1e6:
         return f"{value / 1e6:g}MΩ"
     if value >= 1e3:
@@ -445,8 +448,6 @@ def _classify_material(material: Material, mount: str = "") -> str:
     text = f"{name} {spec}"
     if not mount:
         mount = _material_mount(text)
-    if not mount:
-        return ""
 
     if "集成电路" in text or "集成块" in text or "芯片" in text:
         return "IC"
@@ -460,6 +461,8 @@ def _classify_material(material: Material, mount: str = "") -> str:
         return ""          # 发光二极管不参与匹配
     if "二极管" in text:
         return "D"
+    if "有源" in text or "oscillator" in text.lower():
+        return "XO"
     if "晶振" in text or "crystal" in text.lower():
         return "X"
     if "电感" in text and "共模" not in text and "磁珠" not in text:
@@ -514,7 +517,7 @@ def parse_material(material: Material, config: Config) -> ParsedMaterial:
     if parsed.kind == "R":
         parsed.value = parse_resistance(material.spec) or parse_resistance(material.name)
         parsed.power = parse_power(material.spec)
-    elif parsed.kind == "X":
+    if parsed.kind in ("X", "XO"):
         parsed.value = parse_frequency(material.spec) or parse_frequency(material.name)
     elif parsed.kind == "L":
         parsed.value = parse_inductance(material.spec) or parse_inductance(material.name)
@@ -553,6 +556,8 @@ class Component:
     mount: str = "SMT"
     #: 额定电流（电感等，单位 A）
     current: Optional[float] = None
+    #: Value 为 NC/DNP 等不上件标记
+    do_not_place: bool = False
     #: 属性是否已隐藏（False/缺失 表示会显示在原理图上）
     fields_hidden: Dict[str, bool] = field(default_factory=dict)
 
@@ -577,6 +582,46 @@ def _looks_like_led(lib_id: str, value: str) -> bool:
     return text.startswith("LED") or "_LED" in text
 
 
+#: “不上件”的 Value 写法
+NOPOP_VALUES = {"NC", "N/C", "DNP", "DNF", "DNI"}
+
+#: 库名里出现这些字样 → 明确不是电阻/电容/芯片等（不参与自动匹配）
+OTHER_LIB_HINTS = (
+    "connector", "usb", "jack", "header", "socket", "terminal", "pinheader",
+    "switch", "sw_", "relay", "buzzer", "fuse", "battery", "mounting",
+    "testpoint", "net_tie", "jumper", "screw",
+)
+
+
+def _kind_from_lib(lib_low: str) -> str:
+    """根据库名判断元件类别；返回 "" 表示无法判断，"OTHER" 表示明确不匹配。"""
+    if not lib_low:
+        return ""
+    if any(k in lib_low for k in OTHER_LIB_HINTS):
+        return "OTHER"
+    if "led" in lib_low:
+        return "LED"
+    if any(k in lib_low for k in ("oscillator", "tcxo", "vctcxo")):
+        return "XO"
+    if any(k in lib_low for k in ("crystal", "resonator", "xtal")):
+        return "X"
+    if any(k in lib_low for k in ("mosfet", "nmos", "pmos", "transistor_fet")):
+        return "MOS"
+    if re.search(r"(^|:)(mos|fet)(_|$)", lib_low) or "mos" in lib_low or "fet" in lib_low:
+        return "MOS"
+    if "transistor" in lib_low or re.search(r"(^|:)q(_|$)", lib_low):
+        return "Q"
+    if "diode" in lib_low or re.search(r"(^|:)d(_|$)", lib_low) or "bridge" in lib_low:
+        return "D"
+    if "inductor" in lib_low or "ferrite" in lib_low or re.search(r"(^|:)l(_|$)", lib_low):
+        return "L"
+    if "resistor" in lib_low or re.search(r"(^|:)r(_|$)", lib_low):
+        return "R"
+    if "capacitor" in lib_low or re.search(r"(^|:)c(_|$)", lib_low):
+        return "C"
+    return ""
+
+
 def analyze_component(comp: Component, config: Config) -> Component:
     """补全类别 / 尺寸 / 封装 / 数值 / 型号。"""
     ref = (comp.reference or "").upper()
@@ -595,38 +640,50 @@ def analyze_component(comp: Component, config: Config) -> Component:
     comp.tolerance = parse_tolerance(comp.value)
     comp.mount = "THT" if is_tht_footprint(comp.footprint) else "SMT"
 
-    if prefix.startswith("LED"):
-        return comp  # 发光二极管不匹配
-    if prefix.startswith("R"):
-        if any(k in text for k in ("potentiometer", "thermistor", "network", "r_pack")):
-            return comp
-        comp.kind = "R"
-    elif prefix.startswith("C"):
-        comp.kind = "C"
-    elif prefix.startswith("L") or any(k in lib_low for k in ("inductor", "ferrite")):
-        comp.kind = "L"
-    elif any(k in lib_low for k in ("crystal", "resonator", "xtal")):
-        comp.kind = "X"
-        comp.size = extract_crystal_size(comp.footprint) or comp.size
-    elif prefix.startswith("D"):
-        if _looks_like_led(lib, comp.value):
-            return comp
-        comp.kind = "D"
-    elif prefix.startswith(("Q", "T")):
-        comp.kind = "MOS" if any(k in lib_low for k in ("mos", "fet", "nmos", "pmos")) else "Q"
-    elif prefix.startswith("U") or prefix.startswith("IC"):
-        comp.kind = "IC"
-    else:
+    # Value = NC / DNP 的元件不上件，不参与匹配
+    if (comp.value or "").strip().upper() in NOPOP_VALUES:
+        comp.do_not_place = True
         return comp
 
-    if comp.kind == "R":
+    kind = _kind_from_lib(lib_low)
+    if kind in ("OTHER", "LED"):
+        return comp  # 连接器/开关等不自动匹配；发光二极管不匹配
+
+    if not kind:
+        # 库名看不出类别时，退回按位号前缀判断
+        if prefix.startswith("LED"):
+            return comp
+        if prefix.startswith("R"):
+            if any(k in text for k in ("potentiometer", "thermistor", "network", "r_pack")):
+                return comp
+            kind = "R"
+        elif prefix.startswith("C"):
+            kind = "C"
+        elif prefix.startswith("L"):
+            kind = "L"
+        elif prefix.startswith("D"):
+            if _looks_like_led(lib, comp.value):
+                return comp
+            kind = "D"
+        elif prefix.startswith(("Q", "T")):
+            kind = "MOS" if any(k in lib_low for k in ("mos", "fet", "nmos", "pmos")) else "Q"
+        elif prefix.startswith("U") or prefix.startswith("IC"):
+            kind = "IC"
+        else:
+            return comp
+
+    comp.kind = kind
+    if kind in ("X", "XO"):
+        comp.size = extract_crystal_size(comp.footprint) or comp.size
+
+    if kind == "R":
         comp.value_num = parse_resistance(comp.value)
-    elif comp.kind == "C":
+    elif kind == "C":
         comp.value_num = parse_capacitance(comp.value)
-    elif comp.kind == "L":
+    elif kind == "L":
         comp.value_num = parse_inductance(comp.value)
         comp.current = parse_current(comp.value)
-    elif comp.kind == "X":
+    elif kind in ("X", "XO"):
         comp.value_num = parse_frequency(comp.value)
     else:
         comp.model = (comp.value or "").strip()
@@ -710,7 +767,11 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
     if not parsed.kind or parsed.kind != comp.kind:
         return False
     # 贴片/插件必须是同一类，避免把插件料用到贴片元件上
-    if parsed.mount and comp.mount and parsed.mount != comp.mount:
+    if parsed.mount:
+        if comp.mount and parsed.mount != comp.mount:
+            return False
+    elif comp.mount == "THT":
+        # 物料没写贴片/插件时按贴片处理，插件元件不套用
         return False
     material = parsed.material
 
@@ -721,7 +782,7 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
             return False
         return _num_equal(parsed.value, comp.value_num)
 
-    if comp.kind == "X":
+    if comp.kind in ("X", "XO"):
         if comp.size and parsed.size and comp.size != parsed.size:
             return False
         if comp.value_num is None or parsed.value is None:
@@ -779,11 +840,10 @@ def build_candidates(comp: Component, materials: Iterable[Material],
                 stock,
                 candidate.pn,
             )
-        if comp.kind == "X":
+        if comp.kind in ("X", "XO"):
             return (
                 candidate.brand_rank,
                 0 if (comp.size and candidate.parsed.size == comp.size) else 1,
-                1 if "有源" in (candidate.material.name or "") else 0,
                 stock,
                 candidate.pn,
             )
@@ -852,6 +912,7 @@ THT_KIND_RULES = {
     "C": "插件电容",
     "L": "插件电感",
     "X": "插件晶振",
+    "XO": "插件晶振",
     "D": "插件二极管",
     "IC": "插件集成电路",
     "Q": "插件三极管",
@@ -885,7 +946,7 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
 
 
     if comp.kind == "R":
-        value_text = format_resistance(comp.value_num) if comp.value_num else comp.value
+        value_text = format_resistance(comp.value_num) if comp.value_num is not None else comp.value
         tolerance = format_tolerance(comp.tolerance) or (config.get("new_resistor_tolerance") or "±5%")
         power_table = config.get("resistor_power_by_size") or {}
         power = power_table.get(size, "")
@@ -893,7 +954,7 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "C":
-        value_text = format_capacitance(comp.value_num) if comp.value_num else comp.value
+        value_text = format_capacitance(comp.value_num) if comp.value_num is not None else comp.value
         voltage_table = config.get("capacitor_voltage_by_size") or {}
         voltage = voltage_table.get(size, "50V")
         tolerance = format_tolerance(comp.tolerance) or (config.get("new_capacitor_tolerance") or "±10%")
