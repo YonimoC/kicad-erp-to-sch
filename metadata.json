@@ -2,7 +2,7 @@
     "$schema": "https://go.kicad.org/pcm/schemas/v2",
     "name": "ERP to SCH",
     "description": "按原理图元件的数值/型号/封装匹配 ERP 物料，写入 PartNumber 与 Description",
-    "description_full": "在原理图编辑器工具栏一键扫描当前工程，按元件的 Value、型号与封装到 ERP 原材料基础数据中匹配物料：贴片电阻/电容按尺寸+数值，贴片二极管/集成电路/三极管/MOS 按型号（发光二极管 LED 不参与匹配）。品牌优先级 FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅在有库存时使用)；都没有时按内置的《物料参数要求表》格式新建 FH 新料并把 PartNumber 写为「（新料）」。界面列出工程内全部元件，可直接搜索 ERP 物料并手动指定 PartNumber/Description。写入前自动备份 .kicad_sch，写入后自动让 KiCad 重新加载原理图（调用「文件 → 放弃变更」）。适用于 KiCad 10 原理图编辑器（IPC 插件）。",
+    "description_full": "在原理图编辑器工具栏一键扫描当前工程，按元件的 Value、型号与封装到 ERP 原材料基础数据中匹配物料：贴片电阻/电容按尺寸+数值，贴片二极管/集成电路/三极管/MOS 按型号（发光二极管 LED 不参与匹配）。品牌优先级 FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅在有库存时使用)；都没有时按内置的《物料参数要求表》格式新建 FH 新料并把 PartNumber 写为「新料」。界面列出工程内全部元件，可直接搜索 ERP 物料并手动指定 PartNumber/Description。写入前自动备份 .kicad_sch，写入后自动让 KiCad 重新加载原理图（调用「文件 → 放弃变更」）。适用于 KiCad 10 原理图编辑器（IPC 插件）。",
     "identifier": "com.github.YonimoC.kicad-erp-to-sch",
     "type": "plugin",
     "author": {
@@ -17,7 +17,7 @@
     },
     "versions": [
         {
-            "version": "1.0.5",
+            "version": "1.0.6",
             "status": "stable",
             "kicad_version": "10.0",
             "runtime": "ipc",

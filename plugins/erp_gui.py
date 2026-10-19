@@ -328,7 +328,7 @@ class NewItemDialog(wx.Dialog):
         grid.Add(self.choice, 1, wx.EXPAND)
 
         grid.Add(wx.StaticText(panel, label="PartNumber"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.txt_pn = wx.TextCtrl(panel, value=str(config.get("new_partnumber") or "（新料）"))
+        self.txt_pn = wx.TextCtrl(panel, value=str(config.get("new_partnumber") or "新料"))
         grid.Add(self.txt_pn, 1, wx.EXPAND)
         sizer.Add(grid, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
@@ -924,7 +924,7 @@ class ErpToSchDialog(wx.Dialog):
                 return
             pn, description = dlg.values()
         if not pn:
-            pn = str(self.config.get("new_partnumber") or "（新料）")
+            pn = str(self.config.get("new_partnumber") or "新料")
         row.selected = None
         row.pn = pn
         row.description = description
@@ -938,7 +938,7 @@ class ErpToSchDialog(wx.Dialog):
         if row is None:
             return
         with wx.TextEntryDialog(self, "物料编码（PartNumber）", "手动输入",
-                                row.pn or "（新料）") as dlg:
+                                row.pn or "新料") as dlg:
             if dlg.ShowModal() != wx.ID_OK:
                 return
             pn = dlg.GetValue().strip()
@@ -1043,7 +1043,7 @@ class ErpToSchDialog(wx.Dialog):
         """写入范围下拉：勾选已匹配 / 新料 / 手动修改。"""
         menu = wx.Menu()
         labels = {"已匹配": "写入已匹配的物料",
-                  "新料": "写入新料（（新料））",
+                  "新料": "写入新料（PartNumber 写「新料」）",
                   "手动": "写入手动修改的"}
         id_to_key: Dict[int, str] = {}
         for key, label in labels.items():

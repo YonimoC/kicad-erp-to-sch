@@ -926,7 +926,7 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
     注意：只有电阻/电容的新料才补品牌（FH），其它类别不写品牌。
     """
     brand = config.get("new_brand") or "FH"
-    pn = config.get("new_partnumber") or "（新料）"
+    pn = config.get("new_partnumber") or "新料"
     size = comp.size or ""
     package = comp.package or comp.size or ""
 

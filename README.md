@@ -42,7 +42,7 @@ KiCad 原理图插件：把原理图里的元件按「数值 / 型号 + 封装�
 * 禁用物料不参与匹配；
 * SAMSUNG 等其它品牌不会自动选用（只在候选列表里展示）；
 * 电阻 Value 没写容差时优先 ±5%，写了 `1%` 才优先 ±1%；
-* 全部没有时按内置《物料参数要求表》的字段顺序生成新料，PartNumber 写 `（新料）`；
+* 全部没有时按内置《物料参数要求表》的字段顺序生成新料，PartNumber 写 `新料`；
 * **品牌只在新建电阻/电容时补 FH**，二极管、IC、三极管、MOS、LED、连接器等新料不写品牌；
 * 写入的 `Description` / `PartNumber` 一律为**隐藏字段**（不会显示在原理图上）；
   若旧文件里的这两个字段原本是可见的，重新扫描并写入也会一并改成隐藏。
@@ -140,7 +140,7 @@ KiCad 10 的原理图 IPC API 还不能修改图元，也没有"重新加载文�
 | `resistor_tolerance_priority` | 未标注容差时的优先顺序 |
 | `resistor_power_by_size` | 新建电阻时按封装补的功率 |
 | `capacitor_voltage_by_size` | 新建电容时按封装补的耐压 |
-| `new_partnumber` | 新料的 PartNumber，默认 `（新料）` |
+| `new_partnumber` | 新料的 PartNumber，默认 `新料` |
 
 ---
 

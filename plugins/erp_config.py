@@ -81,7 +81,12 @@ DEFAULTS: Dict[str, Any] = {
     "new_capacitor_dielectric": "X7R",
     # 仅电阻/电容新料才补品牌（其它类别不写品牌）
     "new_brand": "FH",
-    "new_partnumber": "（新料）",
+    "new_partnumber": "新料",
+}
+
+#: 旧版本默认值 → 新默认值（读取配置时自动迁移）
+LEGACY_VALUES = {
+    "new_partnumber": {"（新料）": "新料", "(新料)": "新料"},
 }
 
 
@@ -127,6 +132,10 @@ class Config:
                 if isinstance(loaded, dict):
                     merged = copy.deepcopy(DEFAULTS)
                     merged.update(loaded)
+                    for key, mapping in LEGACY_VALUES.items():
+                        value = merged.get(key)
+                        if isinstance(value, str) and value in mapping:
+                            merged[key] = mapping[value]
                     self.data = merged
         except Exception:
             self.data = copy.deepcopy(DEFAULTS)
