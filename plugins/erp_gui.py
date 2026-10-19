@@ -196,9 +196,9 @@ class ErpToSchDialog(wx.Dialog):
 
         # 表格
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        columns = [("位号", 110), ("类别", 60), ("Value", 110), ("封装", 80),
-                   ("状态", 90), ("PartNumber", 140), ("描述", 470),
-                   ("品牌", 80), ("库存", 70), ("候选", 60)]
+        columns = [("位号", 100), ("类别", 55), ("Value", 100), ("封装", 70),
+                   ("状态", 90), ("PartNumber", 130), ("描述", 390),
+                   ("品牌", 70), ("库存", 60), ("候选", 50)]
         for idx, (title, width) in enumerate(columns):
             self.list.InsertColumn(idx, title, width=width)
         root.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
@@ -208,6 +208,11 @@ class ErpToSchDialog(wx.Dialog):
         root.Add(self.status, 0, wx.EXPAND | wx.ALL, 10)
 
         panel.SetSizer(root)
+
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(outer)
+        self.Layout()
 
         self.txt_erp.Bind(wx.EVT_KILL_FOCUS, lambda e: self._on_path_changed())
         btn_erp.Bind(wx.EVT_BUTTON, lambda e: self._browse_erp())
@@ -367,6 +372,11 @@ class ErpToSchDialog(wx.Dialog):
         if comp.kind in ("R", "C") and not comp.size:
             row.status = "缺少封装"
             row.note = "无法从 Footprint 识别尺寸"
+            return row
+
+        if comp.kind in ("R", "C") and comp.value_num is None:
+            row.status = "无法识别数值"
+            row.note = f"Value={comp.value}"
             return row
 
         row.candidates = build_candidates(comp, self.materials, self.config,

@@ -11,3 +11,4 @@ __pycache__/
 
 # 本地测试
 _dev/_tmp*/
+_dev/*.png

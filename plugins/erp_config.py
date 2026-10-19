@@ -26,7 +26,9 @@ DEFAULTS: Dict[str, Any] = {
     # 品牌优选顺序（越小越优先）。国巨 = YAGEO，写成两种别名都认。
     "preferred_brands": ["FH", "厚声", "YAGEO", "国巨"],
     # 兜底品牌：只有在优选品牌都没有、且库存 > 0 时才使用。
-    "fallback_brands": ["SUP", "SAMSUNG"],
+    # 注意：SUP/SAMSUNG 等属于要逐步淘汰的品牌，只有 SUP 允许"有库存时先用掉"，
+    # SAMSUNG 一律不自动选用（不在这里配置）。
+    "fallback_brands": ["SUP"],
     # 品牌别名归一化（规格文本里出现的中英文写法）
     "brand_aliases": {
         "风华": "FH",
