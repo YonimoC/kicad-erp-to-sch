@@ -15,7 +15,7 @@ import erp_rules
 import kicad_session
 import kicad_ui
 import sch_sexpr
-from erp_config import Config
+from erp_config import Config, PLUGIN_VERSION
 from erp_data import Material, load_materials
 from erp_match import (
     KIND_LABELS,
@@ -33,7 +33,7 @@ from erp_match import (
     search_normalize,
 )
 
-APP_TITLE = "ERP 物料匹配（PartNumber / Description）"
+APP_TITLE = f"ERP 物料匹配（PartNumber / Description） v{PLUGIN_VERSION}"
 
 
 def natural_key(text: str) -> str:
@@ -543,15 +543,14 @@ class ErpToSchDialog(wx.Dialog):
         tools = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_reload = wx.Button(panel, label="重新加载物料表")
         self.btn_scan = wx.Button(panel, label="扫描")
+        self.btn_match_opts = wx.Button(panel, label="匹配类别 ▾", style=wx.BU_EXACTFIT)
         self.btn_match = wx.Button(panel, label="匹配")
         self.btn_pick = wx.Button(panel, label="选择候选…")
         self.btn_search = wx.Button(panel, label="搜索物料…")
         self.btn_rules = wx.Button(panel, label="参数要求…")
-        for button in (self.btn_reload, self.btn_scan, self.btn_match, self.btn_pick,
-                       self.btn_search, self.btn_rules):
+        for button in (self.btn_reload, self.btn_scan, self.btn_match_opts, self.btn_match,
+                       self.btn_pick, self.btn_search, self.btn_rules):
             tools.Add(button, 0, wx.RIGHT, 8)
-        self.btn_match_opts = wx.Button(panel, label="匹配类别 ▾", style=wx.BU_EXACTFIT)
-        tools.Add(self.btn_match_opts, 0, wx.RIGHT, 8)
         tools.AddStretchSpacer()
         self.btn_apply = wx.Button(panel, label="写入原理图")
         self.btn_apply_opts = wx.Button(panel, label="写入范围 ▾", style=wx.BU_EXACTFIT)
