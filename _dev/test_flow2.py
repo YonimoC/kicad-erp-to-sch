@@ -34,6 +34,7 @@ def main() -> int:
     print("=== 场景 1：贴片样图 ===")
     dlg.txt_project.SetValue(str(work))
     dlg._scan()
+    dlg._match_all(interactive=False)
     dump(dlg)
 
     r_group = next(r for r in dlg.rows if r.comp.reference == "R1")
@@ -53,6 +54,7 @@ def main() -> int:
 
     dlg.rows = []
     dlg._scan()
+    dlg._match_all(interactive=False)
     states = {}
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
@@ -67,6 +69,7 @@ def main() -> int:
     print("\n=== 场景 2：插件件工程 ===")
     dlg.txt_project.SetValue(str(work2))
     dlg._scan()
+    dlg._match_all(interactive=False)
     for row in dlg.rows:
         if row.status not in ("插件件跳过", "未自动匹配"):
             print(f"  {row.references:12s} x{row.member_count:<2d} {row.comp.kind:3s} "

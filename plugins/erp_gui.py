@@ -389,6 +389,8 @@ class ErpToSchDialog(wx.Dialog):
         self._build_ui()
         self._detect_project()
         self._load_data(verbose=True)
+        # 打开插件先自动扫描（只读，不改任何东西）
+        wx.CallAfter(self._auto_scan)
 
     # -- UI ---------------------------------------------------------------
     def _build_ui(self) -> None:
@@ -413,11 +415,12 @@ class ErpToSchDialog(wx.Dialog):
 
         tools = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_reload = wx.Button(panel, label="重新加载物料表")
-        self.btn_scan = wx.Button(panel, label="扫描并匹配")
+        self.btn_scan = wx.Button(panel, label="扫描")
+        self.btn_match = wx.Button(panel, label="匹配")
         self.btn_pick = wx.Button(panel, label="选择候选…")
         self.btn_search = wx.Button(panel, label="搜索物料…")
         self.btn_rules = wx.Button(panel, label="参数要求…")
-        for button in (self.btn_reload, self.btn_scan, self.btn_pick,
+        for button in (self.btn_reload, self.btn_scan, self.btn_match, self.btn_pick,
                        self.btn_search, self.btn_rules):
             tools.Add(button, 0, wx.RIGHT, 8)
         tools.AddStretchSpacer()
@@ -449,6 +452,7 @@ class ErpToSchDialog(wx.Dialog):
         btn_proj.Bind(wx.EVT_BUTTON, lambda e: self._browse_project())
         self.btn_reload.Bind(wx.EVT_BUTTON, lambda e: self._load_data(verbose=True, force=True))
         self.btn_scan.Bind(wx.EVT_BUTTON, lambda e: self._scan())
+        self.btn_match.Bind(wx.EVT_BUTTON, lambda e: self._match_all())
         self.btn_pick.Bind(wx.EVT_BUTTON, lambda e: self._pick_candidate())
         self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search_material())
         self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
@@ -546,9 +550,36 @@ class ErpToSchDialog(wx.Dialog):
                 return root
         return ""
 
-    def _scan(self) -> None:
+    def _auto_scan(self) -> None:
+        """打开插件后自动扫描一次（只读，不会覆盖已修改的数据）。"""
+        try:
+            self._scan(interactive=False, verbose=False)
+        except Exception:  # noqa: BLE001
+            self._log(traceback.format_exc())
+
+    def _row_from_schematic(self, comp: Component) -> MatchRow:
+        """扫描时生成一行：只反映原理图当前内容，不做任何匹配。"""
+        row = MatchRow(comp=comp)
+        if comp.do_not_place:
+            row.status = "不上件跳过"
+            row.note = "Value 为 NC/DNP，不上件"
+            return row
+        if comp.partnumber or comp.description:
+            row.pn = comp.partnumber
+            row.description = comp.description
+            row.status = "已是最新"
+            row.note = "原理图里已有 PartNumber/描述"
+            return row
+        row.status = "未匹配"
+        row.note = "点「匹配」按 ERP 物料表自动匹配"
+        return row
+
+    def _scan(self, interactive: bool = True, verbose: bool = True) -> None:
         root = self._resolve_root_schematic()
         if not root:
+            if not interactive:
+                self._log("未自动找到原理图，请点「扫描」手动选择。")
+                return
             with wx.FileDialog(self, "未自动找到原理图，请选择工程的根原理图",
                                wildcard="KiCad 原理图 (*.kicad_sch)|*.kicad_sch",
                                style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
@@ -589,7 +620,7 @@ class ErpToSchDialog(wx.Dialog):
                         },
                     )
                     comp = analyze_component(comp, self.config)
-                    self.rows.append(self._match_component(comp))
+                    self.rows.append(self._row_from_schematic(comp))
         except Exception as exc:  # noqa: BLE001
             del cursor
             wx.MessageBox(f"扫描失败: {exc}", APP_TITLE, wx.OK | wx.ICON_ERROR, self)
@@ -597,7 +628,7 @@ class ErpToSchDialog(wx.Dialog):
             return
         del cursor
 
-        # 按「Value + 封装」分组：完全相同的元件只匹配一次，显示成一行
+        # 按「Value + 封装」分组：完全相同的元件只显示一行
         groups: Dict[Tuple[str, str, str, str], MatchRow] = {}
         unique: List[MatchRow] = []
         for row in self.rows:
@@ -615,11 +646,60 @@ class ErpToSchDialog(wx.Dialog):
 
         self._apply_sort()
         self._refresh_list()
-        matched = sum(1 for r in self.rows if r.selected or r.status == "手动")
-        new_items = sum(1 for r in self.rows if r.status == "新料")
-        self._log(f"原理图 {os.path.basename(root)}：共 {sum(r.member_count for r in self.rows)} 个元件、"
-                  f"{len(self.rows)} 组（跳过电源符号 {skipped} 个），"
-                  f"命中现有料 {matched} 组，新料 {new_items} 组。")
+        ready = sum(1 for r in self.rows if r.status == "已是最新")
+        pending = sum(1 for r in self.rows if r.status == "未匹配")
+        if verbose:
+            self._log(f"扫描 {os.path.basename(root)}：共 {sum(r.member_count for r in self.rows)} 个元件、"
+                      f"{len(self.rows)} 组（跳过电源符号 {skipped} 个），"
+                      f"已有 PartNumber {ready} 组，待匹配 {pending} 组。")
+
+    def _apply_match(self, row: MatchRow) -> None:
+        """对单行执行匹配，把结果写回该行（不动其他行）。"""
+        matched = self._match_component(row.comp)
+        row.candidates = matched.candidates
+        row.selected = matched.selected
+        row.pn = matched.pn
+        row.description = matched.description
+        row.status = matched.status
+        row.note = matched.note
+
+    def _match_all(self, interactive: bool = True) -> None:
+        """只匹配还没有 PartNumber 的行；已有数据的一律不动。"""
+        if not self.rows:
+            if interactive:
+                wx.MessageBox("还没有元件，请先点「扫描」。", APP_TITLE,
+                              wx.OK | wx.ICON_INFORMATION, self)
+            return
+        todo = [r for r in self.rows if r.status == "未匹配"]
+        if not todo:
+            if interactive:
+                wx.MessageBox("没有需要匹配的元件（都已有 PartNumber 或标记为不上件）。",
+                              APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
+            return
+
+        cursor = wx.BusyCursor()
+        for row in todo:
+            self._apply_match(row)
+        del cursor
+
+        self._apply_sort()
+        self._refresh_list()
+        matched = sum(1 for r in todo if r.status in ("已匹配", "已是最新"))
+        new_items = sum(1 for r in todo if r.status == "新料")
+        skipped = len(todo) - matched - new_items
+        self._log(f"匹配 {len(todo)} 组：命中现有料 {matched} 组，新料 {new_items} 组"
+                  + (f"，其它 {skipped} 组" if skipped else "") + "。")
+
+    def _match_selected(self) -> None:
+        """右键：重新匹配单行（会覆盖该行的 PartNumber/描述）。"""
+        row = self._selected_row()
+        if row is None:
+            return
+        cursor = wx.BusyCursor()
+        self._apply_match(row)
+        del cursor
+        self._refresh_list()
+        self._log(f"{row.references}: 重新匹配 → {row.status} {row.pn} {row.description}")
 
     def _group_key(self, comp: Component) -> Tuple[str, str, str, str]:
         """分组依据：类别 + 数值/型号 + 容差 + 封装。"""
@@ -650,7 +730,8 @@ class ErpToSchDialog(wx.Dialog):
         if all_current:
             row.status = "已是最新"
         elif row.status == "已是最新":
-            row.status = "已匹配" if row.selected else "新料"
+            # 内容已有但字段是可见的 / 需要重写，保留待写入状态
+            row.status = "已匹配"
 
     def _match_component(self, comp: Component) -> MatchRow:
         row = MatchRow(comp=comp)
@@ -745,7 +826,7 @@ class ErpToSchDialog(wx.Dialog):
             elif row.status == "手动":
                 self.list.SetItemTextColour(idx, wx.Colour(0, 70, 180))
             elif row.status in ("未自动匹配", "缺少封装", "无法识别数值",
-                                "缺少型号", "插件件跳过", "不上件跳过", "待处理"):
+                                "缺少型号", "插件件跳过", "不上件跳过", "未匹配", "待处理"):
                 self.list.SetItemTextColour(idx, wx.Colour(120, 120, 120))
 
         # 保持滚动位置与选中行，避免编辑后跳回顶部
@@ -816,6 +897,7 @@ class ErpToSchDialog(wx.Dialog):
         if row is None:
             return
         menu = wx.Menu()
+        item_match = menu.Append(wx.ID_ANY, "匹配此行（重新匹配）")
         item_search = menu.Append(wx.ID_ANY, "搜索 ERP 物料…")
         item_candidate = menu.Append(wx.ID_ANY, "查看候选物料…")
         item_new = menu.Append(wx.ID_ANY, "生成新料描述…（可选类别）")
@@ -823,6 +905,7 @@ class ErpToSchDialog(wx.Dialog):
         item_clear = menu.Append(wx.ID_ANY, "清除 PartNumber / 描述")
         menu.AppendSeparator()
         item_copy = menu.Append(wx.ID_ANY, "复制位号")
+        menu.Bind(wx.EVT_MENU, lambda e: self._match_selected(), item_match)
         menu.Bind(wx.EVT_MENU, lambda e: self._search_material(), item_search)
         menu.Bind(wx.EVT_MENU, lambda e: self._pick_candidate(), item_candidate)
         menu.Bind(wx.EVT_MENU, lambda e: self._generate_new_item(), item_new)
@@ -1001,7 +1084,7 @@ class ErpToSchDialog(wx.Dialog):
 
     def _apply(self) -> None:
         if not self.rows:
-            wx.MessageBox("还没有匹配结果，请先点击「扫描并匹配」。", APP_TITLE,
+            wx.MessageBox("还没有元件结果，请先点「扫描」。", APP_TITLE,
                           wx.OK | wx.ICON_INFORMATION, self)
             return
 
