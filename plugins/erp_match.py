@@ -394,15 +394,12 @@ def search_normalize(text: str) -> str:
 
 
 def is_electronic_pn(pn: str) -> bool:
-    """电子物料的料号：1 开头且 9 位（如 101010511）。"""
+    """电子物料的料号：1 开头且 9 位（如 101010511）。
+
+    搜索与自动匹配都只认这种料号，其它（5xxxxx 成品、13 位旧编码等）一律不参与。
+    """
     code = (pn or "").strip()
     return len(code) == 9 and code.startswith("1") and code.isdigit()
-
-
-def is_electronic_prefix(pn: str) -> bool:
-    """电子物料大类前缀：1 开头（如 101010511 / 1004201100014）；排除 5xxxxx 成品等。"""
-    code = (pn or "").strip()
-    return code.startswith("1") and code[:1].isdigit()
 
 
 def search_keyword(comp: "Component") -> str:
@@ -883,8 +880,8 @@ def build_candidates(comp: Component, materials: Iterable[Material],
     for parsed in parsed_materials:
         if parsed.material.disabled:
             continue
-        if not is_electronic_prefix(parsed.material.pn):
-            continue  # 只认电子物料（1 开头），排除 5xxxxx 成品等
+        if not is_electronic_pn(parsed.material.pn):
+            continue  # 只认电子物料料号（1 开头 9 位），排除 5xxxxx 成品等
         if not _material_matches(comp, parsed):
             continue
         result.append(Candidate(parsed=parsed,
@@ -935,7 +932,7 @@ def build_generic_candidates(comp: Component, config: Config,
     for parsed in parsed_materials:
         if parsed.material.disabled:
             continue
-        if not is_electronic_prefix(parsed.material.pn):
+        if not is_electronic_pn(parsed.material.pn):
             continue
         if parsed.mount and comp.mount and parsed.mount != comp.mount:
             continue
