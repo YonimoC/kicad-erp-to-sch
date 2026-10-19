@@ -8,6 +8,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -19,10 +20,29 @@ ROOT_FILES = ["metadata.json"]
 PACK_DIRS = ["plugins", "resources"]
 SKIP_DIRS = {"__pycache__", ".git", "_dev"}
 
+#: 公司 DLP 透明加密的文件会被非受信进程读到这个文件头
+DLP_MAGIC = b"\x88\x7d\x1c"
+
+
+def check_metadata(path: Path) -> None:
+    """确认 metadata.json 是明文、可解析的 JSON（否则 PCM 安装会报错）。"""
+    raw = path.read_bytes()
+    if raw.startswith(DLP_MAGIC):
+        raise SystemExit(
+            f"✗ {path.name} 已被 DLP 加密，PCM 无法识别。\n"
+            "  请用 VS Code 重新保存该文件（修改任意字符再改回）后重新打包。"
+        )
+    try:
+        json.loads(raw.decode("utf-8-sig"))
+    except Exception as exc:
+        raise SystemExit(f"✗ {path.name} 不是合法 JSON: {exc}")
+
 
 def create_zip(source_dir: str, output_zip: str) -> str:
     source = Path(source_dir)
     output = Path(output_zip)
+
+    check_metadata(source / "metadata.json")
 
     def iter_entries():
         for name in ROOT_FILES:
