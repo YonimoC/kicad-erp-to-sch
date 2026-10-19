@@ -208,7 +208,7 @@ def _format_resistance(comp) -> str:
         from erp_match import format_resistance
     except Exception:
         return ""
-    if getattr(comp, "value_num", None):
+    if getattr(comp, "value_num", None) is not None:
         return format_resistance(comp.value_num)
     return ""
 
@@ -218,7 +218,7 @@ def _format_capacitance(comp) -> str:
         from erp_match import format_capacitance
     except Exception:
         return ""
-    if getattr(comp, "value_num", None):
+    if getattr(comp, "value_num", None) is not None:
         return format_capacitance(comp.value_num)
     return ""
 
@@ -240,7 +240,8 @@ def _is_tht(comp) -> bool:
         return False
 
 
-def _field_value(field: str, index: int, rule_name: str, comp, config) -> str:
+def _field_value(field: str, index: int, rule_name: str, comp, config,
+                 display_name: str = "") -> str:
     key = field.split("(")[0].split("（")[0].replace(" ", "")
     kind = getattr(comp, "kind", "") or ""
     size = getattr(comp, "size", "") or ""
@@ -264,9 +265,12 @@ def _field_value(field: str, index: int, rule_name: str, comp, config) -> str:
                     break
             return picked or (options[0] if options else rule_name)
         if any(k in key for k in ("料号名称", "名称", "料号")):
-            return rule_name
+            return display_name or rule_name
     if "尺寸" in key:
-        return size or package
+        # 电阻/电容/电感/晶振看封装尺寸（0603 等），其它类别看器件封装（SOT-23 等）
+        if kind in ("R", "C", "L", "X", "XO"):
+            return size or package
+        return package or size
     if "阻值" in key:
         return _format_resistance(comp) or (getattr(comp, "value", "") or "")
     if "容值" in key:
@@ -327,15 +331,19 @@ def _field_value(field: str, index: int, rule_name: str, comp, config) -> str:
     return ""
 
 
-def build_description(rule_name: str, comp, config) -> str:
-    """按指定类别的参数顺序，用元件现有信息拼一条描述。"""
+def build_description(rule_name: str, comp, config,
+                      display_name: str = "") -> str:
+    """按指定类别的参数顺序，用元件现有信息拼一条描述。
+
+    `display_name` 用于把“IC类”这种表内类别名换成实际写入的“贴片集成电路”。
+    """
     rule = find_rule(rule_name) or GENERIC_RULE
     order = rule.get("order") or GENERIC_RULE["order"]
     fields = [f.strip() for f in re.split(r"[、,，]", order) if f.strip()]
 
     parts: List[str] = []
     for index, field in enumerate(fields):
-        value = _field_value(field, index, rule["name"], comp, config)
+        value = _field_value(field, index, rule["name"], comp, config, display_name)
         if value:
             parts.append(value)
 

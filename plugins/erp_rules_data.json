@@ -424,7 +424,7 @@
   "subcategory": "电子物料",
   "name": "贴片电容",
   "separate_smd_tht": "",
-  "order": "料号名称、尺寸、容值、误差、材质、耐压、品牌",
+  "order": "料号名称、尺寸、容值、耐压、误差、材质、品牌",
   "loss": "0.003",
   "note": "",
   "example": "贴片电容,0603,100nF,50V,±10%,X7R,SAMSUNG"

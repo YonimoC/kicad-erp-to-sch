@@ -919,71 +919,61 @@ THT_KIND_RULES = {
     "MOS": "插件场效应管",
 }
 
+#: 贴片（SMT）新料对应的规则类别
+SMT_KIND_RULES = {
+    "R": "贴片电阻",
+    "C": "贴片电容",
+    "L": "贴片电感",
+    "X": "贴片晶振",
+    "XO": "贴片晶振",
+    "D": "贴片二极管",
+    "IC": "IC类",
+    "Q": "贴片三极管",
+    "MOS": "贴片场效应管",
+}
+
+#: 规则类别名 → 实际写入描述的首字段名
+RULE_DISPLAY_NAMES = {
+    "IC类": "贴片集成电路",
+    "贴片场效应管": "贴片MOS管",
+    "插件场效应管": "插件MOS管",
+    "贴片晶振": "贴片晶振",
+}
+
+
+def canonical_new_rule(comp: Component) -> Tuple[str, str]:
+    """返回新料应使用的 (规则类别, 写入描述的首字段名)。"""
+    kind = comp.kind or ""
+    if not kind:
+        return "", ""
+    if comp.mount == "THT":
+        rule = THT_KIND_RULES.get(kind, "")
+        if kind == "C" and (comp.value_num or 0) >= 1e-6:
+            rule = "插件电解电容"
+    else:
+        rule = SMT_KIND_RULES.get(kind, "")
+    if not rule:
+        return "", ""
+    return rule, RULE_DISPLAY_NAMES.get(rule, rule)
+
 
 def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
-    """返回 (PartNumber, 描述)。字段顺序遵循内置的《物料参数要求表》。
+    """返回 (PartNumber, 描述)。
 
-    注意：只有电阻/电容的新料才补品牌（FH），其它类别不写品牌。
+    与界面右键「生成新料描述」使用**同一个**规则引擎，保证两边文本一致。
+    品牌只在电阻/电容新料里补 FH。
     """
-    brand = config.get("new_brand") or "FH"
     pn = config.get("new_partnumber") or "新料"
-    size = comp.size or ""
     package = comp.package or comp.size or ""
 
-    # 插件元件先按插件的参数要求表生成
-    if comp.mount == "THT" and comp.kind in THT_KIND_RULES:
-        try:
-            import erp_rules
-
-            rule_name = THT_KIND_RULES[comp.kind]
-            if comp.kind == "C" and (comp.value_num or 0) >= 1e-6:
-                rule_name = "插件电解电容"
-            description = erp_rules.build_description(rule_name, comp, config)
-            if description:
-                return pn, description
-        except Exception:
-            pass
-
-
-    if comp.kind == "R":
-        value_text = format_resistance(comp.value_num) if comp.value_num is not None else comp.value
-        tolerance = format_tolerance(comp.tolerance) or (config.get("new_resistor_tolerance") or "±5%")
-        power_table = config.get("resistor_power_by_size") or {}
-        power = power_table.get(size, "")
-        parts = ["贴片电阻", size, value_text, tolerance, power, brand]
-        return pn, ",".join([p for p in parts if p])
-
-    if comp.kind == "C":
-        value_text = format_capacitance(comp.value_num) if comp.value_num is not None else comp.value
-        voltage_table = config.get("capacitor_voltage_by_size") or {}
-        voltage = voltage_table.get(size, "50V")
-        tolerance = format_tolerance(comp.tolerance) or (config.get("new_capacitor_tolerance") or "±10%")
-        dielectric = config.get("new_capacitor_dielectric") or "X7R"
-        parts = ["贴片电容", size, value_text, voltage, tolerance, dielectric, brand]
-        return pn, ",".join([p for p in parts if p])
-
-    if comp.kind == "D":
-        parts = ["贴片二极管", comp.model, package]
-        return pn, ",".join([p for p in parts if p])
-
-    if comp.kind == "IC":
-        parts = ["贴片集成电路", comp.model, package]
-        return pn, ",".join([p for p in parts if p])
-
-    if comp.kind == "Q":
-        parts = ["贴片三极管", comp.model, package]
-        return pn, ",".join([p for p in parts if p])
-
-    if comp.kind == "MOS":
-        parts = ["贴片MOS管", comp.model, package]
-        return pn, ",".join([p for p in parts if p])
-
-    # 未自动匹配/其它类别：按内置《物料参数要求表》生成，类别可猜（界面里也能改）
     try:
         import erp_rules
 
-        rule_name = erp_rules.suggest_rule_name(comp)
-        description = erp_rules.build_description(rule_name, comp, config)
+        rule_name, display = canonical_new_rule(comp)
+        if not rule_name:
+            rule_name = erp_rules.suggest_rule_name(comp)
+            display = RULE_DISPLAY_NAMES.get(rule_name, rule_name)
+        description = erp_rules.build_description(rule_name, comp, config, display_name=display)
         if description:
             return pn, description
     except Exception:

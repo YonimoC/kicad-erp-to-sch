@@ -27,6 +27,7 @@ from erp_match import (
     build_candidates,
     build_generic_candidates,
     build_new_item,
+    canonical_new_rule,
     is_tht_footprint,
     parse_material,
 )
@@ -361,7 +362,16 @@ class NewItemDialog(wx.Dialog):
         if rule:
             self.hint.SetLabel(f"参数顺序：{rule.get('order', '')}\n示例：{rule.get('example', '')}")
         self.hint.Wrap(760)
-        self.txt_desc.SetValue(erp_rules.build_description(name, self.comp, self.config))
+        # 与自动新料保持完全一致（如“IC类”→“贴片集成电路”）
+        display = ""
+        try:
+            rule_name, disp = canonical_new_rule(self.comp)
+            if rule_name and rule_name == name:
+                display = disp
+        except Exception:
+            display = ""
+        self.txt_desc.SetValue(
+            erp_rules.build_description(name, self.comp, self.config, display_name=display))
 
     def values(self) -> Tuple[str, str]:
         return self.txt_pn.GetValue().strip(), self.txt_desc.GetValue().strip()
