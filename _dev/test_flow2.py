@@ -1,4 +1,4 @@
-"""端到端测试：构造/复制工程 -> 扫描 -> 匹配 -> 写入文件。"""
+"""端到端测试：SMD 样图 + 插件件工程。"""
 
 import os
 import shutil
@@ -19,8 +19,8 @@ from test_core import SAMPLE  # noqa: E402
 
 def dump(dlg, limit: int = 12) -> None:
     for row in dlg.rows[:limit]:
-        print(f"  {row.comp.reference:6s} {row.comp.value:8s} size={row.comp.size!r:6s} "
-              f"{row.status:8s} {row.pn:14s} {row.description}")
+        print(f"  {row.comp.reference:5s} {row.comp.kind:3s} {row.comp.value:28s} "
+              f"{row.status:8s} {row.pn:14s} {row.description[:70]}")
 
 
 def main() -> int:
@@ -29,7 +29,6 @@ def main() -> int:
 
     dlg = erp_gui.ErpToSchDialog(None)
 
-    # --- 场景 1：SMD 样图 -------------------------------------------------
     work = Path(tempfile.mkdtemp(prefix="erp-smd-"))
     (work / "demo.kicad_sch").write_text(SAMPLE, encoding="utf-8")
     print("=== 场景 1：贴片样图 ===")
@@ -37,11 +36,11 @@ def main() -> int:
     dlg._scan()
     dump(dlg)
 
-    total = 0
     by_file = {}
     for row in dlg.rows:
         if row.pn and row.status != "已是最新":
             by_file.setdefault(row.comp.file, []).append(row)
+    total = 0
     for path, rows in by_file.items():
         total += dlg._write_file(path, rows)
     print(f"写入 {total} 个元件")
@@ -52,21 +51,25 @@ def main() -> int:
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
     print("重新扫描状态:", states)
-    assert states.get("已是最新") == len(dlg.rows), "写入后应全部是最新状态"
+    assert states.get("已是最新", 0) + states.get("未自动匹配", 0) == len(dlg.rows), states
+    assert states.get("未自动匹配", 0) == 1, states  # 只有 LED
 
-    # --- 场景 2：插件件工程 ----------------------------------------------
     src = Path(r"D:\KiCad\10.0\share\kicad\demos\complex_hierarchy")
     work2 = Path(tempfile.mkdtemp(prefix="erp-tht-")) / src.name
     shutil.copytree(src, work2)
-    print("\n=== 场景 2：插件件工程（应全部跳过） ===")
+    print("\n=== 场景 2：插件件工程 ===")
     dlg.txt_project.SetValue(str(work2))
     dlg._scan()
-    dump(dlg, 6)
+    for row in dlg.rows:
+        if row.status not in ("插件件跳过", "未自动匹配"):
+            print(f"  {row.comp.reference:6s} {row.comp.kind:3s} {row.comp.value:16s} "
+                  f"{row.comp.footprint:50s} {row.status:8s} {row.pn:12s} {row.description[:60]}")
     states = {}
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
     print("状态统计:", states)
-    assert set(states) <= {"插件件跳过", "缺少封装"}, states
+    assert states.get("插件件跳过", 0) >= 30, states
+    assert states.get("已是最新", 0) == 0, states
 
     dlg.Destroy()
     app.Destroy()

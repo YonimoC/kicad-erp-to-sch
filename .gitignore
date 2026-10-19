@@ -12,3 +12,6 @@ __pycache__/
 # 本地测试
 _dev/_tmp*/
 _dev/*.png
+
+# MCP 客户端日志
+_dev/logs/

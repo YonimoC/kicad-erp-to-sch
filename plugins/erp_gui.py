@@ -6,15 +6,18 @@ import os
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import wx
 
+import erp_rules
 import kicad_session
+import kicad_ui
 import sch_sexpr
 from erp_config import Config
-from erp_data import Material, load_materials, read_rules, rule_example, RuleRow
+from erp_data import Material, load_materials
 from erp_match import (
+    KIND_LABELS,
     Candidate,
     Component,
     ParsedMaterial,
@@ -22,15 +25,13 @@ from erp_match import (
     auto_select,
     build_candidates,
     build_new_item,
+    is_tht_footprint,
     parse_material,
 )
 
 APP_TITLE = "ERP 物料匹配（PartNumber / Description）"
 
 
-# --------------------------------------------------------------------------
-# 行数据
-# --------------------------------------------------------------------------
 @dataclass
 class MatchRow:
     comp: Component
@@ -40,6 +41,8 @@ class MatchRow:
     pn: str = ""
     description: str = ""
     note: str = ""
+    #: 多单元符号的其余单元（写入时一起更新）
+    extra_uuids: List[str] = field(default_factory=list)
 
     @property
     def brand(self) -> str:
@@ -54,51 +57,51 @@ class MatchRow:
 
 
 # --------------------------------------------------------------------------
-# 候选选择对话框
+# 物料搜索对话框
 # --------------------------------------------------------------------------
-class CandidateDialog(wx.Dialog):
-    def __init__(self, parent: wx.Window, row: MatchRow):
-        super().__init__(parent, title=f"选择物料 - {row.comp.reference}", size=(900, 460))
-        self.row = row
-        self.choice: Optional[Candidate] = None
-        self.manual_pn = ""
-        self.manual_desc = ""
+class MaterialSearchDialog(wx.Dialog):
+    """在整个 ERP 物料表里搜索并选择物料。"""
+
+    MAX_RESULTS = 1500
+
+    def __init__(self, parent: wx.Window, materials: Sequence[Material],
+                 keyword: str = "", title: str = "搜索 ERP 物料"):
+        super().__init__(parent, title=title, size=(980, 560))
+        self.materials = materials
+        self.results: List[Material] = []
+        self.material: Optional[Material] = None
 
         panel = wx.Panel(self)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        info = (f"位号 {row.comp.reference}    Value {row.comp.value}    "
-                f"封装 {row.comp.footprint or '-'}")
-        sizer.Add(wx.StaticText(panel, label=info), 0, wx.ALL, 8)
+        top = wx.BoxSizer(wx.HORIZONTAL)
+        top.Add(wx.StaticText(panel, label="关键字"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        self.txt_keyword = wx.TextCtrl(panel, value=keyword,
+                                       style=wx.TE_PROCESS_ENTER)
+        top.Add(self.txt_keyword, 1, wx.RIGHT, 6)
+        self.btn_search = wx.Button(panel, label="搜索")
+        top.Add(self.btn_search, 0, wx.RIGHT, 12)
+        self.chk_disabled = wx.CheckBox(panel, label="包含禁用物料")
+        top.Add(self.chk_disabled, 0, wx.ALIGN_CENTER_VERTICAL)
+        sizer.Add(top, 0, wx.EXPAND | wx.ALL, 8)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        for idx, title in enumerate(["物料编码", "描述", "品牌", "库存", "优先级"]):
-            self.list.InsertColumn(idx, title)
-        self.list.SetColumnWidth(0, 140)
-        self.list.SetColumnWidth(1, 470)
-        self.list.SetColumnWidth(2, 90)
-        self.list.SetColumnWidth(3, 80)
-        self.list.SetColumnWidth(4, 90)
-
-        for i, candidate in enumerate(row.candidates):
-            self.list.InsertItem(i, candidate.pn)
-            self.list.SetItem(i, 1, candidate.description)
-            self.list.SetItem(i, 2, candidate.brand)
-            self.list.SetItem(i, 3, f"{candidate.material.stock:g}")
-            self.list.SetItem(i, 4, "优选" if candidate.brand_rank < 100 else
-                              ("备选" if candidate.brand_rank < 1000 else "其他"))
-        if row.candidates:
-            self.list.Select(0)
+        for idx, (title_text, width) in enumerate([
+            ("物料编码", 130), ("物料名称", 150), ("规格 / 描述", 430),
+            ("品牌", 90), ("库存", 70), ("禁用", 50),
+        ]):
+            self.list.InsertColumn(idx, title_text, width=width)
         sizer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
 
+        self.hint = wx.StaticText(panel, label="")
+        sizer.Add(self.hint, 0, wx.ALL, 8)
+
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        btn_ok = wx.Button(panel, wx.ID_OK, "使用选中物料")
-        btn_manual = wx.Button(panel, label="手动输入…")
-        btn_cancel = wx.Button(panel, wx.ID_CANCEL, "取消")
-        buttons.Add(btn_manual, 0, wx.RIGHT, 8)
         buttons.AddStretchSpacer()
-        buttons.Add(btn_cancel, 0, wx.RIGHT, 8)
-        buttons.Add(btn_ok, 0)
+        self.btn_cancel = wx.Button(panel, wx.ID_CANCEL, "取消")
+        self.btn_ok = wx.Button(panel, wx.ID_OK, "使用该物料")
+        buttons.Add(self.btn_cancel, 0, wx.RIGHT, 8)
+        buttons.Add(self.btn_ok, 0)
         sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 8)
 
         panel.SetSizer(sizer)
@@ -106,9 +109,121 @@ class CandidateDialog(wx.Dialog):
         outer.Add(panel, 1, wx.EXPAND)
         self.SetSizer(outer)
 
-        btn_ok.Bind(wx.EVT_BUTTON, self._on_ok)
-        btn_manual.Bind(wx.EVT_BUTTON, self._on_manual)
-        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda evt: self._on_ok(None))
+        self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search())
+        self.txt_keyword.Bind(wx.EVT_TEXT_ENTER, lambda e: self._search())
+        self.btn_ok.Bind(wx.EVT_BUTTON, self._on_ok)
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_ok)
+        self._search()
+
+    def _search(self) -> None:
+        keyword = self.txt_keyword.GetValue().strip().upper()
+        include_disabled = self.chk_disabled.GetValue()
+        keys = [k for k in keyword.split() if k]
+
+        results: List[Material] = []
+        for material in self.materials:
+            if material.disabled and not include_disabled:
+                continue
+            haystack = f"{material.pn} {material.name} {material.spec} {material.brand}".upper()
+            if keys and not all(k in haystack for k in keys):
+                continue
+            results.append(material)
+            if len(results) >= self.MAX_RESULTS:
+                break
+
+        exact = [m for m in results if keyword and m.pn.upper() == keyword]
+        if exact:
+            results.remove(exact[0])
+            results.insert(0, exact[0])
+
+        self.results = results
+        self.list.DeleteAllItems()
+        for idx, material in enumerate(results):
+            self.list.InsertItem(idx, material.pn)
+            self.list.SetItem(idx, 1, material.name)
+            self.list.SetItem(idx, 2, material.spec)
+            self.list.SetItem(idx, 3, material.brand)
+            self.list.SetItem(idx, 4, f"{material.stock:g}" if material.stock else "0")
+            self.list.SetItem(idx, 5, "是" if material.disabled else "")
+            if material.disabled:
+                self.list.SetItemTextColour(idx, wx.Colour(150, 150, 150))
+        if results:
+            self.list.Select(0)
+
+        text = f"共 {len(results)} 条"
+        if len(results) >= self.MAX_RESULTS:
+            text += f"（已截断到 {self.MAX_RESULTS} 条，请输入更精确的关键字）"
+        self.hint.SetLabel(text)
+
+    def _on_ok(self, _event) -> None:
+        index = self.list.GetFirstSelected()
+        if index < 0 or index >= len(self.results):
+            wx.MessageBox("请先选择一个物料。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
+            return
+        self.material = self.results[index]
+        self.EndModal(wx.ID_OK)
+
+
+# --------------------------------------------------------------------------
+# 候选物料对话框
+# --------------------------------------------------------------------------
+class CandidateDialog(wx.Dialog):
+    def __init__(self, parent: wx.Window, row: MatchRow,
+                 materials: Sequence[Material]):
+        super().__init__(parent, title=f"选择物料 - {row.comp.reference}", size=(980, 500))
+        self.row = row
+        self.materials = materials
+        self.choice: Optional[Candidate] = None
+        self.manual: Optional[Material] = None
+        self.manual_pn = ""
+        self.manual_desc = ""
+
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        info = (f"位号 {row.comp.reference}    型号/数值 {row.comp.value}    "
+                f"封装 {row.comp.footprint or '-'}")
+        sizer.Add(wx.StaticText(panel, label=info), 0, wx.ALL, 8)
+
+        self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        for idx, (title, width) in enumerate([
+            ("物料编码", 130), ("描述", 500), ("品牌", 90), ("库存", 80), ("优先级", 80),
+        ]):
+            self.list.InsertColumn(idx, title, width=width)
+        for i, candidate in enumerate(row.candidates):
+            self.list.InsertItem(i, candidate.pn)
+            self.list.SetItem(i, 1, candidate.description)
+            self.list.SetItem(i, 2, candidate.brand)
+            self.list.SetItem(i, 3, f"{candidate.material.stock:g}")
+            self.list.SetItem(i, 4, "优选" if candidate.brand_rank < 100 else
+                              ("备选" if candidate.brand_rank < 1000 else "其他"))
+            if candidate.material.disabled:
+                self.list.SetItemTextColour(i, wx.Colour(150, 150, 150))
+        if row.candidates:
+            self.list.Select(0)
+        sizer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn_search = wx.Button(panel, label="搜索全部物料…")
+        self.btn_manual = wx.Button(panel, label="手动输入…")
+        self.btn_cancel = wx.Button(panel, wx.ID_CANCEL, "取消")
+        self.btn_ok = wx.Button(panel, wx.ID_OK, "使用选中物料")
+        buttons.Add(self.btn_search, 0, wx.RIGHT, 8)
+        buttons.Add(self.btn_manual, 0, wx.RIGHT, 8)
+        buttons.AddStretchSpacer()
+        buttons.Add(self.btn_cancel, 0, wx.RIGHT, 8)
+        buttons.Add(self.btn_ok, 0)
+        sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 8)
+
+        panel.SetSizer(sizer)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(outer)
+
+        self.btn_ok.Bind(wx.EVT_BUTTON, self._on_ok)
+        self.btn_manual.Bind(wx.EVT_BUTTON, self._on_manual)
+        self.btn_search.Bind(wx.EVT_BUTTON, self._on_search)
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_ok)
 
     def _on_ok(self, _event) -> None:
         index = self.list.GetFirstSelected()
@@ -117,6 +232,14 @@ class CandidateDialog(wx.Dialog):
             return
         self.choice = self.row.candidates[index]
         self.EndModal(wx.ID_OK)
+
+    def _on_search(self, _event) -> None:
+        keyword = self.row.comp.model or self.row.comp.value
+        with MaterialSearchDialog(self, self.materials, keyword) as dlg:
+            if dlg.ShowModal() != wx.ID_OK or dlg.material is None:
+                return
+            self.manual = dlg.material
+            self.EndModal(wx.ID_OK)
 
     def _on_manual(self, _event) -> None:
         with wx.TextEntryDialog(self, "物料编码（PartNumber）", "手动输入") as dlg:
@@ -135,18 +258,40 @@ class CandidateDialog(wx.Dialog):
 
 
 # --------------------------------------------------------------------------
+# 参数要求表（内置）
+# --------------------------------------------------------------------------
+class RulesDialog(wx.Dialog):
+    def __init__(self, parent: wx.Window):
+        super().__init__(parent, title="物料参数要求（内置）", size=(760, 520))
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        text = wx.TextCtrl(panel, value=erp_rules.rule_text(),
+                           style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP)
+        font = text.GetFont()
+        font.SetFamily(wx.FONTFAMILY_TELETYPE)
+        text.SetFont(font)
+        sizer.Add(text, 1, wx.EXPAND | wx.ALL, 8)
+        btn = wx.Button(panel, wx.ID_OK, "关闭")
+        sizer.Add(btn, 0, wx.ALIGN_RIGHT | wx.ALL, 8)
+        panel.SetSizer(sizer)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(outer)
+        btn.Bind(wx.EVT_BUTTON, lambda e: self.EndModal(wx.ID_OK))
+
+
+# --------------------------------------------------------------------------
 # 主对话框
 # --------------------------------------------------------------------------
 class ErpToSchDialog(wx.Dialog):
     def __init__(self, parent: Optional[wx.Window] = None):
-        super().__init__(parent, title=APP_TITLE, size=(1240, 720))
+        super().__init__(parent, title=APP_TITLE, size=(1280, 760))
         self.config = Config()
         self.materials: List[Material] = []
         self.parsed_materials: List[ParsedMaterial] = []
-        self.rules: List[RuleRow] = []
         self.rows: List[MatchRow] = []
         self.schematic_files: List[str] = []
-        self.project_dir = str(self.config.get("last_project_dir") or "")
+        self.root_schematic = ""
 
         self._build_ui()
         self._detect_project()
@@ -157,8 +302,7 @@ class ErpToSchDialog(wx.Dialog):
         panel = wx.Panel(self)
         root = wx.BoxSizer(wx.VERTICAL)
 
-        # 数据源
-        grid = wx.FlexGridSizer(3, 3, 6, 8)
+        grid = wx.FlexGridSizer(2, 3, 6, 8)
         grid.AddGrowableCol(1, 1)
 
         grid.Add(wx.StaticText(panel, label="ERP 物料表"), 0, wx.ALIGN_CENTER_VERTICAL)
@@ -167,48 +311,40 @@ class ErpToSchDialog(wx.Dialog):
         btn_erp = wx.Button(panel, label="浏览…")
         grid.Add(btn_erp, 0)
 
-        grid.Add(wx.StaticText(panel, label="参数要求表"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.txt_rules = wx.TextCtrl(panel, value=self.config.rules_file)
-        grid.Add(self.txt_rules, 1, wx.EXPAND)
-        btn_rules = wx.Button(panel, label="浏览…")
-        grid.Add(btn_rules, 0)
-
         grid.Add(wx.StaticText(panel, label="工程目录"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.txt_project = wx.TextCtrl(panel, value=self.project_dir)
+        self.txt_project = wx.TextCtrl(panel)
         grid.Add(self.txt_project, 1, wx.EXPAND)
         btn_proj = wx.Button(panel, label="浏览…")
         grid.Add(btn_proj, 0)
-
         root.Add(grid, 0, wx.EXPAND | wx.ALL, 10)
 
-        # 工具栏
         tools = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_reload = wx.Button(panel, label="重新加载物料表")
         self.btn_scan = wx.Button(panel, label="扫描并匹配")
         self.btn_pick = wx.Button(panel, label="选择候选…")
+        self.btn_search = wx.Button(panel, label="搜索物料…")
+        self.btn_rules = wx.Button(panel, label="参数要求…")
         self.btn_apply = wx.Button(panel, label="写入原理图")
-        tools.Add(self.btn_reload, 0, wx.RIGHT, 8)
-        tools.Add(self.btn_scan, 0, wx.RIGHT, 8)
-        tools.Add(self.btn_pick, 0, wx.RIGHT, 8)
+        for button in (self.btn_reload, self.btn_scan, self.btn_pick,
+                       self.btn_search, self.btn_rules):
+            tools.Add(button, 0, wx.RIGHT, 8)
         tools.AddStretchSpacer()
         tools.Add(self.btn_apply, 0)
         root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        # 表格
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        columns = [("位号", 100), ("类别", 55), ("Value", 100), ("封装", 70),
-                   ("状态", 90), ("PartNumber", 130), ("描述", 390),
-                   ("品牌", 70), ("库存", 60), ("候选", 50)]
-        for idx, (title, width) in enumerate(columns):
+        for idx, (title, width) in enumerate([
+            ("位号", 100), ("类别", 60), ("Value/型号", 150), ("封装", 90),
+            ("状态", 105), ("PartNumber", 125), ("描述", 360),
+            ("品牌", 70), ("库存", 60), ("候选", 50),
+        ]):
             self.list.InsertColumn(idx, title, width=width)
         root.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        # 状态栏/日志
-        self.status = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 90))
+        self.status = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 96))
         root.Add(self.status, 0, wx.EXPAND | wx.ALL, 10)
 
         panel.SetSizer(root)
-
         outer = wx.BoxSizer(wx.VERTICAL)
         outer.Add(panel, 1, wx.EXPAND)
         self.SetSizer(outer)
@@ -216,125 +352,135 @@ class ErpToSchDialog(wx.Dialog):
 
         self.txt_erp.Bind(wx.EVT_KILL_FOCUS, lambda e: self._on_path_changed())
         btn_erp.Bind(wx.EVT_BUTTON, lambda e: self._browse_erp())
-        btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._browse_rules())
         btn_proj.Bind(wx.EVT_BUTTON, lambda e: self._browse_project())
         self.btn_reload.Bind(wx.EVT_BUTTON, lambda e: self._load_data(verbose=True, force=True))
         self.btn_scan.Bind(wx.EVT_BUTTON, lambda e: self._scan())
         self.btn_pick.Bind(wx.EVT_BUTTON, lambda e: self._pick_candidate())
+        self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search_material())
+        self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
         self.btn_apply.Bind(wx.EVT_BUTTON, lambda e: self._apply())
-        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._pick_candidate())
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._activate_row())
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
-    # -- 数据源 -----------------------------------------------------------
+    # -- 路径 -------------------------------------------------------------
     def _browse_erp(self) -> None:
-        with wx.FileDialog(self, "选择 ERP 物料表", wildcard="Excel 文件 (*.xls;*.xlsx)|*.xls;*.xlsx",
+        with wx.FileDialog(self, "选择 ERP 物料表",
+                           wildcard="Excel 文件 (*.xls;*.xlsx)|*.xls;*.xlsx",
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.txt_erp.SetValue(dlg.GetPath())
                 self._on_path_changed()
                 self._load_data(verbose=True, force=True)
 
-    def _browse_rules(self) -> None:
-        with wx.FileDialog(self, "选择物料参数要求表", wildcard="Excel 文件 (*.xls;*.xlsx)|*.xls;*.xlsx",
-                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
-            if dlg.ShowModal() == wx.ID_OK:
-                self.txt_rules.SetValue(dlg.GetPath())
-                self._on_path_changed()
-                self._load_data(verbose=True, force=False)
-
     def _browse_project(self) -> None:
-        with wx.DirDialog(self, "选择 KiCad 工程目录", defaultPath=self.txt_project.GetValue() or "") as dlg:
+        with wx.DirDialog(self, "选择 KiCad 工程目录",
+                          defaultPath=self.txt_project.GetValue() or "") as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.txt_project.SetValue(dlg.GetPath())
                 self._on_path_changed()
 
     def _on_path_changed(self) -> None:
         self.config.set("erp_file", self.txt_erp.GetValue().strip())
-        self.config.set("rules_file", self.txt_rules.GetValue().strip())
         self.config.set("last_project_dir", self.txt_project.GetValue().strip())
         self.config.save()
 
     def _detect_project(self) -> None:
         filename, project_dir = kicad_session.get_open_schematic()
         if project_dir and os.path.isdir(project_dir):
-            self.project_dir = project_dir
             self.txt_project.SetValue(project_dir)
-            self.config.set("last_project_dir", project_dir)
-            self.config.save()
-
-        path = kicad_session.find_schematic(filename, [self.project_dir]) if filename else ""
-        if path:
-            self._log(f"检测到原理图: {path}")
         elif filename:
-            self._log(f"KiCad 报告的原理图: {filename}（未找到完整路径，请选择工程目录）")
+            path = kicad_session.find_schematic(
+                filename, [self.config.get("last_project_dir") or ""])
+            if path:
+                self.txt_project.SetValue(os.path.dirname(path))
+        if not self.txt_project.GetValue():
+            for folder in (kicad_session.process_hint_dirs()
+                           + kicad_session.open_project_dirs()):
+                root = kicad_session.find_root_schematic(folder)
+                if root:
+                    self.txt_project.SetValue(os.path.dirname(root))
+                    break
+        if self.txt_project.GetValue():
+            self.config.set("last_project_dir", self.txt_project.GetValue())
+            self.config.save()
+            self._log(f"工程目录: {self.txt_project.GetValue()}")
         else:
-            self._log("未从 KiCad 获取到原理图（可手动选择工程目录，或在设置中启用 API）。")
+            self._log("未自动检测到工程目录（扫描时会再尝试一次）。")
 
     def _load_data(self, verbose: bool = True, force: bool = False) -> None:
-        errors: List[str] = []
-        cursor = wx.BusyCursor()
-
         erp = self.txt_erp.GetValue().strip()
-        rules = self.txt_rules.GetValue().strip()
+        cursor = wx.BusyCursor()
         try:
             if force or not self.materials:
                 self.materials = load_materials(erp, self.config.cache_dir)
                 self.parsed_materials = [parse_material(m, self.config)
                                          for m in self.materials if not m.disabled]
         except Exception as exc:  # noqa: BLE001
-            errors.append(f"物料表读取失败: {exc}")
-        try:
-            self.rules = read_rules(rules) if rules else []
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"参数要求表读取失败: {exc}")
-
+            del cursor
+            self._log(f"物料表读取失败: {exc}")
+            wx.MessageBox(f"物料表读取失败:\n{exc}", APP_TITLE, wx.OK | wx.ICON_WARNING, self)
+            return
         del cursor
-
         if verbose:
             self._log(f"物料表: {len(self.materials)} 条")
-            if self.rules:
-                self._log(f"参数要求表: {len(self.rules)} 条")
-        for message in errors:
-            self._log(message)
-            wx.MessageBox(message, APP_TITLE, wx.OK | wx.ICON_WARNING, self)
 
-    # -- 扫描 / 匹配 -------------------------------------------------------
-    def _scan(self) -> None:
+    # -- 扫描 -------------------------------------------------------------
+    def _resolve_root_schematic(self) -> str:
+        filename, ipc_dir = kicad_session.get_open_schematic()
         project = self.txt_project.GetValue().strip()
-        filename, _ = kicad_session.get_open_schematic()
 
-        root_file = ""
-        if project and filename:
-            root_file = kicad_session.find_schematic(filename, [project])
-        if not root_file and project:
-            root_file = kicad_session.find_schematic("", [project])
-            if not root_file:
-                candidates = sorted(
-                    (p for p in os.listdir(project) if p.lower().endswith(".kicad_sch")),
-                    key=lambda p: os.path.getmtime(os.path.join(project, p)),
-                    reverse=True,
-                )
-                if candidates:
-                    root_file = os.path.join(project, candidates[0])
-        if not root_file:
-            with wx.FileDialog(self, "选择原理图文件", wildcard="KiCad 原理图 (*.kicad_sch)|*.kicad_sch",
+        dirs: List[str] = []
+        for d in (project, ipc_dir):
+            if d and d not in dirs and os.path.isdir(d):
+                dirs.append(d)
+        for d in kicad_session.process_hint_dirs() + kicad_session.open_project_dirs():
+            if d not in dirs and os.path.isdir(d):
+                dirs.append(d)
+
+        if filename:
+            for d in dirs:
+                candidate = os.path.join(d, filename)
+                if os.path.isfile(candidate):
+                    return os.path.abspath(candidate)
+
+        for d in dirs:
+            root = kicad_session.find_root_schematic(d)
+            if root:
+                return root
+        return ""
+
+    def _scan(self) -> None:
+        root = self._resolve_root_schematic()
+        if not root:
+            with wx.FileDialog(self, "未自动找到原理图，请选择工程的根原理图",
+                               wildcard="KiCad 原理图 (*.kicad_sch)|*.kicad_sch",
                                style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
                 if dlg.ShowModal() != wx.ID_OK:
                     return
-                root_file = dlg.GetPath()
+                root = dlg.GetPath()
+
+        self.root_schematic = root
+        project_dir = os.path.dirname(root)
+        if self.txt_project.GetValue().strip() != project_dir:
+            self.txt_project.SetValue(project_dir)
+            self._on_path_changed()
 
         cursor = wx.BusyCursor()
         try:
-            self.schematic_files = sch_sexpr.collect_schematics(root_file)
+            self.schematic_files = sch_sexpr.collect_schematics(root)
             self.rows = []
             skipped = 0
             for path in self.schematic_files:
                 text = sch_sexpr.load_file(path)
                 for symbol in sch_sexpr.read_symbols(text):
+                    ref = symbol.reference
+                    if not ref or ref.startswith("#"):
+                        skipped += 1
+                        continue
                     comp = Component(
                         file=path,
                         uuid=symbol.uuid,
-                        reference=symbol.reference,
+                        reference=ref,
                         value=symbol.value,
                         footprint=symbol.footprint,
                         lib_id=symbol.lib_id,
@@ -342,9 +488,6 @@ class ErpToSchDialog(wx.Dialog):
                         partnumber=symbol.partnumber,
                     )
                     comp = analyze_component(comp, self.config)
-                    if not comp.kind or (comp.value_num is None and comp.kind != "D"):
-                        skipped += 1
-                        continue
                     self.rows.append(self._match_component(comp))
         except Exception as exc:  # noqa: BLE001
             del cursor
@@ -353,22 +496,39 @@ class ErpToSchDialog(wx.Dialog):
             return
         del cursor
 
+        # 多单元元件（U1A/U1B）在文件里是多个 symbol，合并成一行显示，写入时全部更新
+        unique: List[MatchRow] = []
+        grouped: Dict[Tuple[str, str], MatchRow] = {}
+        for row in self.rows:
+            key = (row.comp.file, row.comp.reference)
+            primary = grouped.get(key)
+            if primary is not None:
+                primary.extra_uuids.append(row.comp.uuid)
+            else:
+                row.extra_uuids = [row.comp.uuid]
+                grouped[key] = row
+                unique.append(row)
+        self.rows = unique
+
         self._refresh_list()
-        matched = sum(1 for r in self.rows if r.selected)
+        matched = sum(1 for r in self.rows if r.selected or r.status == "手动")
         new_items = sum(1 for r in self.rows if r.status == "新料")
-        self._log(f"扫描 {len(self.schematic_files)} 个原理图，可匹配元件 {len(self.rows)} 个"
-                  f"（跳过 {skipped} 个非电阻/电容/二极管），命中 {matched}，新料 {new_items}。")
+        self._log(f"原理图 {os.path.basename(root)}：共 {len(self.rows)} 个元件"
+                  f"（跳过电源符号 {skipped} 个），命中现有料 {matched}，新料 {new_items}。")
 
     def _match_component(self, comp: Component) -> MatchRow:
         row = MatchRow(comp=comp)
 
-        footprint_lib = (comp.footprint or "").split(":")[0].lower()
-        if "tht" in footprint_lib or "throughhole" in footprint_lib:
+        if is_tht_footprint(comp.footprint):
             row.status = "插件件跳过"
             row.note = "第一版只匹配贴片元件"
             return row
 
-        # 电阻/电容必须有封装才能确定尺寸；没有就交给人工补全，不乱建料。
+        if not comp.kind:
+            row.status = "未自动匹配"
+            row.note = "该类型不参与自动匹配（如 LED/连接器），可手动搜索物料"
+            return row
+
         if comp.kind in ("R", "C") and not comp.size:
             row.status = "缺少封装"
             row.note = "无法从 Footprint 识别尺寸"
@@ -379,9 +539,13 @@ class ErpToSchDialog(wx.Dialog):
             row.note = f"Value={comp.value}"
             return row
 
+        if comp.kind in ("D", "IC", "Q", "MOS") and not comp.model:
+            row.status = "缺少型号"
+            return row
+
         row.candidates = build_candidates(comp, self.materials, self.config,
                                           self.parsed_materials)
-        chosen = auto_select(row.candidates, self.config)
+        chosen = auto_select(row.candidates, self.config, comp.kind)
         if chosen is not None:
             row.selected = chosen
             row.pn = chosen.pn
@@ -404,10 +568,9 @@ class ErpToSchDialog(wx.Dialog):
         self.list.DeleteAllItems()
         for idx, row in enumerate(self.rows):
             self.list.InsertItem(idx, row.comp.reference)
-            kind_text = {"R": "电阻", "C": "电容", "D": "二极管"}.get(row.comp.kind, row.comp.kind)
-            self.list.SetItem(idx, 1, kind_text)
+            self.list.SetItem(idx, 1, row.comp.kind_label)
             self.list.SetItem(idx, 2, row.comp.value)
-            self.list.SetItem(idx, 3, row.comp.size or "-")
+            self.list.SetItem(idx, 3, row.comp.size or row.comp.package or "-")
             self.list.SetItem(idx, 4, row.status)
             self.list.SetItem(idx, 5, row.pn)
             self.list.SetItem(idx, 6, row.description)
@@ -418,6 +581,11 @@ class ErpToSchDialog(wx.Dialog):
                 self.list.SetItemTextColour(idx, wx.Colour(200, 90, 0))
             elif row.status == "已匹配":
                 self.list.SetItemTextColour(idx, wx.Colour(0, 120, 0))
+            elif row.status == "手动":
+                self.list.SetItemTextColour(idx, wx.Colour(0, 70, 180))
+            elif row.status in ("未自动匹配", "缺少封装", "无法识别数值",
+                                "缺少型号", "插件件跳过"):
+                self.list.SetItemTextColour(idx, wx.Colour(120, 120, 120))
 
     def _selected_row(self) -> Optional[MatchRow]:
         index = self.list.GetFirstSelected()
@@ -425,25 +593,63 @@ class ErpToSchDialog(wx.Dialog):
             return None
         return self.rows[index]
 
+    def _activate_row(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        if row.candidates:
+            self._pick_candidate()
+        else:
+            self._search_material()
+
+    def _assign_material(self, row: MatchRow, material: Material) -> None:
+        row.selected = None
+        row.pn = material.pn
+        row.description = material.spec
+        row.status = "手动"
+        row.note = "手动选择"
+
     def _pick_candidate(self) -> None:
         row = self._selected_row()
         if row is None:
-            wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
+            wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE,
+                          wx.OK | wx.ICON_INFORMATION, self)
             return
-        with CandidateDialog(self, row) as dlg:
-            if dlg.ShowModal() != wx.ID_OK:
+        with CandidateDialog(self, row, self.materials) as dlg:
+            result = dlg.ShowModal()
+            if result != wx.ID_OK:
                 return
             if dlg.choice is not None:
                 row.selected = dlg.choice
                 row.pn = dlg.choice.pn
                 row.description = dlg.choice.description
                 row.status = "手动"
+            elif dlg.manual is not None:
+                self._assign_material(row, dlg.manual)
             elif dlg.manual_pn:
                 row.selected = None
                 row.pn = dlg.manual_pn
                 row.description = dlg.manual_desc
                 row.status = "手动"
         self._refresh_list()
+
+    def _search_material(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE,
+                          wx.OK | wx.ICON_INFORMATION, self)
+            return
+        keyword = row.comp.model or row.comp.value
+        with MaterialSearchDialog(self, self.materials, keyword,
+                                  f"为 {row.comp.reference} 搜索物料") as dlg:
+            if dlg.ShowModal() != wx.ID_OK or dlg.material is None:
+                return
+            self._assign_material(row, dlg.material)
+        self._refresh_list()
+
+    def _show_rules(self) -> None:
+        with RulesDialog(self) as dlg:
+            dlg.ShowModal()
 
     # -- 写入 -------------------------------------------------------------
     def _apply(self) -> None:
@@ -454,17 +660,16 @@ class ErpToSchDialog(wx.Dialog):
 
         todo = [r for r in self.rows
                 if r.pn and r.status != "已是最新"
-                and ((r.pn != r.comp.partnumber) or (r.description and r.description != r.comp.description))]
+                and ((r.pn != r.comp.partnumber)
+                     or (r.description and r.description != r.comp.description))]
         if not todo:
             wx.MessageBox("没有需要写入的改动。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
             return
 
         answer = wx.MessageBox(
             f"将写入 {len(todo)} 个元件到 {len(set(r.comp.file for r in todo))} 个原理图文件。\n\n"
-            "注意：\n"
-            "1. 写入前会自动备份为 *.kicad_sch.erp-bak；\n"
-            "2. 写入后请在 KiCad 中执行「文件 → 重新加载」；\n"
-            "3. 重新加载前不要保存原理图，否则改动会被覆盖。\n\n"
+            "写入后会尝试让 KiCad 自动重新加载原理图；\n"
+            "重新加载会丢弃内存里尚未保存的修改，请先按 Ctrl+S 保存。\n\n"
             "继续吗？",
             APP_TITLE, wx.YES_NO | wx.ICON_QUESTION, self)
         if answer != wx.YES:
@@ -489,7 +694,19 @@ class ErpToSchDialog(wx.Dialog):
         message = f"已写入 {written} 个元件。"
         if failures:
             message += "\n\n以下文件写入失败：\n" + "\n".join(failures)
-        message += "\n\n请回到原理图窗口执行：文件 → 重新加载（Revert）。"
+
+        refreshed = False
+        if written and not failures:
+            try:
+                refreshed, info = kicad_ui.refresh_schematic(self.root_schematic or
+                                                             todo[0].comp.file)
+                message += f"\n\n{info}"
+            except Exception as exc:  # noqa: BLE001
+                self._log(traceback.format_exc())
+                message += f"\n\n自动刷新失败: {exc}"
+        if not refreshed:
+            message += "\n\n请回到原理图窗口执行：文件 → 放弃变更（Revert）。"
+
         wx.MessageBox(message, APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
         self._log(message)
 
@@ -500,16 +717,17 @@ class ErpToSchDialog(wx.Dialog):
         edits = []
         count = 0
         for row in rows:
-            symbol = symbols.get(row.comp.uuid)
-            if symbol is None:
-                continue
             changed = False
-            if row.pn and row.pn != symbol.get_field("PartNumber"):
-                edits.append(sch_sexpr.plan_set_property(text, symbol, "PartNumber", row.pn))
-                changed = True
-            if row.description and row.description != symbol.get_field("Description"):
-                edits.append(sch_sexpr.plan_set_property(text, symbol, "Description", row.description))
-                changed = True
+            for uuid in (row.extra_uuids or [row.comp.uuid]):
+                symbol = symbols.get(uuid)
+                if symbol is None:
+                    continue
+                if row.pn and row.pn != symbol.get_field("PartNumber"):
+                    edits.append(sch_sexpr.plan_set_property(text, symbol, "PartNumber", row.pn))
+                    changed = True
+                if row.description and row.description != symbol.get_field("Description"):
+                    edits.append(sch_sexpr.plan_set_property(text, symbol, "Description", row.description))
+                    changed = True
             if changed:
                 count += 1
 
@@ -530,9 +748,6 @@ class ErpToSchDialog(wx.Dialog):
         event.Skip()
 
 
-# --------------------------------------------------------------------------
-# 入口
-# --------------------------------------------------------------------------
 def run() -> int:
     app = wx.App(False)
     dialog = ErpToSchDialog(None)

@@ -1,34 +1,52 @@
 """元件 <-> ERP 物料匹配规则。
 
-匹配思路
---------
-1. 从原理图元件拿到：类别(电阻/电容/二极管)、封装尺寸(0603…)、数值(10KΩ/100nF…)、
-   容差(Value 里写了才用)、型号(二极管)。
-2. 在 ERP 物料表里筛出「同类别 + 同尺寸 + 数值相等」的物料。
-3. 按品牌优先级排序：FH > 厚声 > YAGEO(国巨) > (备选：SUP/SAMSUNG 需有库存)。
-4. 同一品牌下：容差优先（未标注时 5% 优先）、库存多的优先。
-5. 全都没有 -> 按参数要求表格式新建一个 FH 新料，PartNumber 写「（新料）」。
+支持的类别
+----------
+* R   贴片电阻      ：Value + 封装尺寸（10K + 0603）
+* C   贴片电容      ：Value + 封装尺寸（100nF + 0603）
+* D   贴片二极管    ：型号（SS14 …）—— **发光二极管(LED) 不参与匹配**
+* IC  贴片集成电路  ：型号（LM358 / BS84B08A-3 …）
+* Q   贴片三极管    ：型号（BC847C …）
+* MOS 贴片 MOS 管   ：型号（AO3400A ……）
+
+品牌策略（仅电阻/电容）
+----------------------
+FH(风华) > 厚声 > YAGEO(国巨) > SUP(仅库存>0) > 新建 FH 新料。
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from erp_config import Config
 from erp_data import Material
 
-#: 常见贴片封装尺寸（按长度排序）
+# --------------------------------------------------------------------------
+# 正则
+# --------------------------------------------------------------------------
+#: 贴片尺寸
 SIZE_RE = re.compile(r"(?<!\d)(0201|0402|0603|0805|1206|1210|1812|2010|2512)(?!\d)")
 
-# 数值 token
+#: 常见封装
+PACKAGE_RE = re.compile(
+    r"(?<![A-Za-z0-9])("
+    r"SOT-?\d{2,3}(?:-\d+)?|SOD-?\d{2,3}|"
+    r"TSSOP-?\d+|SSOP-?\d+|MSOP-?\d+|SOP-?\d+|SOIC-?\d+|SO-?\d+|"
+    r"QFN-?\d+|DFN-?\d+|LQFP-?\d+|TQFP-?\d+|QFP-?\d+|BGA-?\d+|"
+    r"SC-?\d+(?:-\d+)?|SMA|SMB|SMC|DO-?\d+|TO-?\d+(?:-\d+)?|DIP-?\d+"
+    r")",
+    re.I,
+)
+
 _RES_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([kKmMRr])?(\d*)$")
 _CAP_COMPACT_RE = re.compile(r"^(\d+(?:\.\d+)?)([pnuµμPNU])?(\d*)$")
 _TOL_RE = re.compile(r"±?\s*(\d+(?:\.\d+)?)\s*%")
 _VOLT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*V(?![A-Za-z])")
 _POWER_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s*W", re.I)
 _DIELECTRIC_RE = re.compile(r"(X7R|X5R|X6S|X6T|NPO|NP0|C0G|COG|Y5V|Z5U)", re.I)
+_MODEL_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-/\+_]*$")
 
 _UNIT_SCALE = {
     "p": 1e-12, "P": 1e-12,
@@ -36,6 +54,33 @@ _UNIT_SCALE = {
     "u": 1e-6, "U": 1e-6,
     "µ": 1e-6, "μ": 1e-6,
 }
+
+KIND_LABELS = {
+    "R": "电阻",
+    "C": "电容",
+    "D": "二极管",
+    "IC": "芯片",
+    "Q": "三极管",
+    "MOS": "MOS管",
+}
+
+#: 插件封装前缀（第一版只匹配贴片）
+THT_PACKAGES = ("DIP-", "TO-92", "TO-126", "TO-220", "TO-247", "TO-3")
+
+
+def is_tht_footprint(footprint: str) -> bool:
+    """判断是否为插件（THT）封装。"""
+    footprint = footprint or ""
+    if not footprint:
+        return False
+    library, _, name = footprint.partition(":")
+    library_low = library.lower()
+    name_upper = name.upper()
+    if any(k in library_low for k in ("tht", "throughhole")):
+        return True
+    if "DIP" in library.upper():
+        return True
+    return name_upper.startswith(THT_PACKAGES)
 
 
 # --------------------------------------------------------------------------
@@ -46,13 +91,34 @@ def extract_size(text: str) -> str:
     return m.group(1) if m else ""
 
 
-def _res_multiplier(unit: str) -> float:
-    return {"k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6, "r": 1.0, "R": 1.0}.get(unit, 1.0)
+def normalize_package(raw: str) -> str:
+    if not raw:
+        return ""
+    text = raw.upper().replace(" ", "")
+    m = re.match(r"^(SOT|SOD|SOIC|SO|SOP|SSOP|TSSOP|MSOP|QFN|DFN|LQFP|TQFP|QFP|BGA|SC|DO|TO|DIP)-?(\d.*)$", text)
+    return f"{m.group(1)}-{m.group(2)}" if m else text
+
+
+def extract_package(text: str) -> str:
+    m = PACKAGE_RE.search(text or "")
+    return normalize_package(m.group(1)) if m else ""
+
+
+def package_equal(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    a, b = a.upper(), b.upper()
+    if a == b:
+        return True
+    return a.startswith(b + "-") or b.startswith(a + "-")
 
 
 def _normalize_decimal_comma(text: str) -> str:
-    """把 "4,7K" / "0,1uF" 这类欧式小数逗号转成小数点。"""
     return re.sub(r"(\d),(\d)", r"\1.\2", text)
+
+
+def _res_multiplier(unit: str) -> float:
+    return {"k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6, "r": 1.0, "R": 1.0}.get(unit, 1.0)
 
 
 def _parse_compact_resistance(token: str) -> Optional[float]:
@@ -106,7 +172,6 @@ def _parse_compact_capacitance(token: str) -> Optional[float]:
         return None
     if unit:
         return base * _UNIT_SCALE.get(unit, 1.0)
-    # 没单位：只有明确带 F 后缀时才当做法拉
     return base if token.strip()[-1:] in ("F", "f") else None
 
 
@@ -114,7 +179,6 @@ def parse_capacitance(text: str) -> Optional[float]:
     """从描述里解析容值（法拉）。"""
     if not text:
         return None
-    # 优先取带 F 后缀的 token
     for m in re.finditer(r"([^\s,，;；()（）]+?)F\b", text, re.I):
         value = _parse_compact_capacitance(m.group(1) + "F")
         if value is not None:
@@ -126,9 +190,7 @@ def parse_capacitance(text: str) -> Optional[float]:
     stripped = text.strip()
     m = _CAP_COMPACT_RE.match(stripped.replace("µ", "u").replace("μ", "u"))
     if m and m.group(2):
-        value = _parse_compact_capacitance(stripped)
-        if value is not None:
-            return value
+        return _parse_compact_capacitance(stripped)
     return None
 
 
@@ -192,9 +254,39 @@ def format_capacitance(value: float) -> str:
 
 
 def format_tolerance(value: Optional[float]) -> str:
-    if not value:
-        return ""
-    return f"±{value:g}%"
+    return f"±{value:g}%" if value else ""
+
+
+# --------------------------------------------------------------------------
+# 型号
+# --------------------------------------------------------------------------
+def normalize_model(text: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+
+
+def _looks_like_model(token: str) -> bool:
+    t = (token or "").strip()
+    if len(t) < 4 or len(t) > 40:
+        return False
+    if not _MODEL_TOKEN_RE.match(t):
+        return False
+    if "." in t:
+        return False
+    if re.fullmatch(r"\d+(\.\d+)?[A-Za-z%]{1,2}", t):
+        return False
+    if not any(c.isalpha() for c in t) or not any(c.isdigit() for c in t):
+        return False
+    package = extract_package(t)
+    if package and package.replace("-", "") == t.upper().replace("-", ""):
+        return False
+    return True
+
+
+def extract_model_from_spec(spec: str) -> str:
+    for token in re.split(r"[,，;；\s]+", spec or ""):
+        if _looks_like_model(token):
+            return token
+    return ""
 
 
 # --------------------------------------------------------------------------
@@ -203,9 +295,11 @@ def format_tolerance(value: Optional[float]) -> str:
 @dataclass
 class ParsedMaterial:
     material: Material
-    kind: str = ""              # R / C / D
-    size: str = ""
-    value: Optional[float] = None      # 欧姆 / 法拉
+    kind: str = ""              # R / C / D / IC / Q / MOS
+    size: str = ""              # 0603…
+    model: str = ""             # SS14 / LM358 / BC847C / AO3400A
+    package: str = ""           # SOT-23 / SOD-123 / SOP-8
+    value: Optional[float] = None
     tolerance: Optional[float] = None
     voltage: Optional[float] = None
     dielectric: str = ""
@@ -216,19 +310,28 @@ class ParsedMaterial:
 def _classify_material(material: Material) -> str:
     name = material.name or ""
     spec = material.spec or ""
-    text = name + " " + spec
+    text = f"{name} {spec}"
+    if "插件" in text and "贴片" not in text:
+        return ""
     if "贴片" not in text:
         return ""
-    if "电阻" in text:
-        if any(k in text for k in ("热敏", "可调", "电位", "插件", "采样", "合金", "排阻", "水泥")):
-            return ""
-        return "R"
-    if "电容" in text:
-        if any(k in text for k in ("电解", "钽", "插件", "瓷片", "安规")):
-            return ""
-        return "C"
+
+    if "集成电路" in text or name.startswith("贴片IC") or name.startswith("贴片集成电路"):
+        return "IC"
+    if "热敏" in text or "可调" in text or "电位" in text or "采样" in text:
+        return ""
+    if "MOS" in name.upper() or "场效应" in text:
+        return "MOS"
+    if "三极管" in text:
+        return "Q"
+    if "发光" in text:
+        return ""          # 发光二极管不参与匹配
     if "二极管" in text:
         return "D"
+    if "电阻" in text and "排阻" not in text and "合金" not in text:
+        return "R"
+    if "电容" in text and "电解" not in text and "钽" not in text:
+        return "C"
     return ""
 
 
@@ -236,13 +339,13 @@ def normalize_brand(raw: str, config: Config) -> str:
     aliases: Dict[str, str] = config.get("brand_aliases") or {}
     upper_map = {str(k).upper(): v for k, v in aliases.items() if str(k).isascii()}
     text = (raw or "").strip()
-    if text:
-        if text in aliases:
-            return aliases[text]
-        if text.upper() in upper_map:
-            return upper_map[text.upper()]
-        return text
-    return ""
+    if not text:
+        return ""
+    if text in aliases:
+        return aliases[text]
+    if text.upper() in upper_map:
+        return upper_map[text.upper()]
+    return text
 
 
 def _brand_from_text(text: str, config: Config) -> str:
@@ -265,6 +368,7 @@ def parse_material(material: Material, config: Config) -> ParsedMaterial:
         parsed.brand = _brand_from_text(text, config)
 
     parsed.size = extract_size(text)
+    parsed.package = extract_package(material.spec) or extract_package(material.name)
     parsed.tolerance = parse_tolerance(material.spec)
 
     if parsed.kind == "R":
@@ -274,6 +378,10 @@ def parse_material(material: Material, config: Config) -> ParsedMaterial:
         parsed.value = parse_capacitance(material.spec)
         parsed.voltage = parse_voltage(material.spec)
         parsed.dielectric = parse_dielectric(material.spec)
+    elif parsed.kind in ("D", "IC", "Q", "MOS"):
+        parsed.model = extract_model_from_spec(material.spec) or extract_model_from_spec(material.name)
+        if not parsed.package:
+            parsed.package = extract_package(material.spec)
     return parsed
 
 
@@ -290,9 +398,10 @@ class Component:
     lib_id: str
     kind: str = ""
     size: str = ""
+    package: str = ""
+    model: str = ""
     value_num: Optional[float] = None
     tolerance: Optional[float] = None
-    model: str = ""
     description: str = ""
     partnumber: str = ""
 
@@ -300,43 +409,60 @@ class Component:
     def label(self) -> str:
         return self.reference or self.uuid[:8]
 
+    @property
+    def kind_label(self) -> str:
+        return KIND_LABELS.get(self.kind, self.kind or "其他")
+
+
+def _looks_like_led(lib_id: str, value: str) -> bool:
+    lib = (lib_id or "").lower()
+    if "led" in lib or "发光" in (value or ""):
+        return True
+    text = (value or "").upper()
+    return text.startswith("LED") or "_LED" in text
+
 
 def analyze_component(comp: Component, config: Config) -> Component:
-    """补全类别 / 尺寸 / 数值 / 容差。"""
+    """补全类别 / 尺寸 / 封装 / 数值 / 型号。"""
     ref = (comp.reference or "").upper()
-    lib = (comp.lib_id or "")
-
-    if ref.startswith("#") or "power" in lib.lower():
-        # 电源符号/图框符号，跳过
+    if not ref or ref.startswith("#"):
         return comp
 
-    prefix = re.match(r"([A-Z]+)", ref)
-    prefix_text = prefix.group(1) if prefix else ""
+    lib = comp.lib_id or ""
+    lib_low = lib.lower()
+    text = f"{lib_low} {comp.footprint} {comp.value}".lower()
+    prefix_match = re.match(r"([A-Z]+)", ref)
+    prefix = prefix_match.group(1) if prefix_match else ""
 
-    if prefix_text in ("R", "RN") or lib.lower().startswith("device:r"):
+    if prefix.startswith("LED"):
+        return comp  # 发光二极管不匹配
+    if prefix.startswith("R"):
+        if any(k in text for k in ("potentiometer", "thermistor", "network", "r_pack")):
+            return comp
         comp.kind = "R"
-    elif prefix_text in ("C", "CN") or lib.lower().startswith("device:c"):
+    elif prefix.startswith("C"):
         comp.kind = "C"
-    elif prefix_text in ("D", "LED") or lib.lower().startswith("device:d") or lib.lower().startswith("device:led"):
+    elif prefix.startswith("D"):
+        if _looks_like_led(lib, comp.value):
+            return comp
         comp.kind = "D"
+    elif prefix.startswith(("Q", "T")):
+        comp.kind = "MOS" if any(k in lib_low for k in ("mos", "fet", "nmos", "pmos")) else "Q"
+    elif prefix.startswith("U") or prefix.startswith("IC"):
+        comp.kind = "IC"
     else:
         return comp
 
-    # 排除可调/热敏等特殊器件
-    text = f"{lib} {comp.footprint} {comp.value}".lower()
-    if comp.kind == "R" and any(k in text for k in ("potentiometer", "thermistor", "r_pack", "resistor_network")):
-        comp.kind = ""
-        return comp
-
     comp.size = extract_size(comp.footprint) or extract_size(comp.value)
+    comp.package = extract_package(comp.footprint) or extract_package(comp.value)
     comp.tolerance = parse_tolerance(comp.value)
 
     if comp.kind == "R":
         comp.value_num = parse_resistance(comp.value)
     elif comp.kind == "C":
         comp.value_num = parse_capacitance(comp.value)
-    elif comp.kind == "D":
-        comp.model = comp.value.strip()
+    else:
+        comp.model = (comp.value or "").strip()
     return comp
 
 
@@ -347,7 +473,6 @@ def analyze_component(comp: Component, config: Config) -> Component:
 class Candidate:
     parsed: ParsedMaterial
     brand_rank: int = 9999
-    reason: str = ""
 
     @property
     def material(self) -> Material:
@@ -377,9 +502,7 @@ def _brand_rank(brand: str, config: Config, kind: str) -> int:
     fallback = [str(b).upper() for b in (config.get("fallback_brands") or [])]
     b = (brand or "").upper()
     if not b:
-        # 二极管没有指定品牌策略，允许选"品牌为空但有库存"的料；
-        # 电阻/电容则宁可按规则新建 FH，也不自动选无品牌料。
-        return 500 if kind == "D" else 1000
+        return 500 if kind not in ("R", "C") else 1000
     if b in preferred:
         return preferred.index(b)
     if b in fallback:
@@ -391,12 +514,13 @@ def _tolerance_rank(tol: Optional[float], want: Optional[float], kind: str,
                     config: Config) -> int:
     if want:
         return 0 if (tol is not None and abs(tol - want) < 1e-9) else 1
-    order = (config.get("resistor_tolerance_priority") if kind == "R"
-             else config.get("capacitor_tolerance_priority")) or []
-    try:
-        values = [float(v) for v in order]
-    except (TypeError, ValueError):
-        values = []
+    order = ("resistor_tolerance_priority" if kind == "R" else "capacitor_tolerance_priority")
+    values: List[float] = []
+    for v in (config.get(order) or []):
+        try:
+            values.append(float(v))
+        except (TypeError, ValueError):
+            continue
     if tol is None:
         return len(values) + 1
     for i, v in enumerate(values):
@@ -419,31 +543,28 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
     if not parsed.kind or parsed.kind != comp.kind:
         return False
     material = parsed.material
+
     if comp.kind in ("R", "C"):
         if comp.size and parsed.size and comp.size != parsed.size:
             return False
         if comp.value_num is None or parsed.value is None:
             return False
         return _num_equal(parsed.value, comp.value_num)
-    if comp.kind == "D":
-        model = (comp.model or "").upper()
-        if model:
-            text = f"{material.name} {material.spec}".upper()
-            if model not in text:
-                return False
-        if comp.size and parsed.size and comp.size != parsed.size:
-            return False
-        return True
-    return False
+
+    # 二极管 / IC / 三极管 / MOS：按型号匹配
+    if not comp.model:
+        return False
+    needle = normalize_model(comp.model)
+    if len(needle) < 3:
+        return False
+    haystack = normalize_model(material.spec) + "|" + normalize_model(material.name)
+    return needle in haystack
 
 
 def build_candidates(comp: Component, materials: Iterable[Material],
                      config: Config,
                      parsed_materials: Optional[Sequence[ParsedMaterial]] = None) -> List[Candidate]:
-    """返回按优先级排序的候选（含非优选品牌，供人工挑选）。
-
-    ``parsed_materials`` 可传入预先解析好的整体物料表，避免每个元件都重新解析 1.5 万行。
-    """
+    """返回按优先级排序的候选（含非优选品牌，供人工挑选）。"""
     if not comp.kind:
         return []
     if parsed_materials is None:
@@ -455,40 +576,57 @@ def build_candidates(comp: Component, materials: Iterable[Material],
             continue
         if not _material_matches(comp, parsed):
             continue
-        candidate = Candidate(parsed=parsed, brand_rank=_brand_rank(parsed.brand, config, comp.kind))
-        result.append(candidate)
+        result.append(Candidate(parsed=parsed,
+                                brand_rank=_brand_rank(parsed.brand, config, comp.kind)))
 
-    result.sort(key=lambda c: (
-        c.brand_rank,
-        _tolerance_rank(c.parsed.tolerance, comp.tolerance, comp.kind, config),
-        _dielectric_rank(c.parsed.dielectric, comp.kind, config),
-        -c.parsed.material.stock,
-        c.pn,
-    ))
+    def sort_key(candidate: Candidate):
+        stock = -candidate.material.stock
+        if comp.kind in ("R", "C"):
+            return (
+                candidate.brand_rank,
+                _tolerance_rank(candidate.parsed.tolerance, comp.tolerance, comp.kind, config),
+                _dielectric_rank(candidate.parsed.dielectric, comp.kind, config),
+                stock,
+                candidate.pn,
+            )
+        # 型号类：型号完全一致 > 封装一致 > 库存多
+        model_exact = 0 if normalize_model(comp.model) == normalize_model(candidate.parsed.model) else 1
+        package_rank = 0 if package_equal(comp.package, candidate.parsed.package) else 1
+        return (model_exact, package_rank, stock, candidate.pn)
+
+    result.sort(key=sort_key)
     return result
 
 
-def auto_select(candidates: Sequence[Candidate], config: Config) -> Optional[Candidate]:
-    """按品牌策略选一个：优选品牌 -> 兜底品牌(有库存) -> None（需要新建）。"""
+def auto_select(candidates: Sequence[Candidate], config: Config,
+                kind: str = "") -> Optional[Candidate]:
+    """按策略选一个；返回 None 表示需要新建。"""
+    if kind in ("R", "C"):
+        for candidate in candidates:
+            if candidate.brand_rank < 100:
+                return candidate
+        for candidate in candidates:
+            if candidate.brand_rank < 1000 and candidate.material.stock > 0:
+                return candidate
+        return None
+
     for candidate in candidates:
-        if candidate.brand_rank < 100:
+        if candidate.material.stock > 0:
             return candidate
-    for candidate in candidates:
-        if candidate.brand_rank < 1000 and candidate.material.stock > 0:
-            return candidate
-    return None
+    return candidates[0] if candidates else None
 
 
 # --------------------------------------------------------------------------
 # 新建物料
 # --------------------------------------------------------------------------
 def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
-    """返回 (PartNumber, 描述)。描述沿用物料参数要求表的字段顺序。"""
+    """返回 (PartNumber, 描述)。字段顺序遵循内置的《物料参数要求表》。"""
     brand = config.get("new_brand") or "FH"
     pn = config.get("new_partnumber") or "（新料）"
+    size = comp.size or ""
+    package = comp.package or ""
 
     if comp.kind == "R":
-        size = comp.size or ""
         value_text = format_resistance(comp.value_num) if comp.value_num else comp.value
         tolerance = format_tolerance(comp.tolerance) or (config.get("new_resistor_tolerance") or "±5%")
         power_table = config.get("resistor_power_by_size") or {}
@@ -497,7 +635,6 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "C":
-        size = comp.size or ""
         value_text = format_capacitance(comp.value_num) if comp.value_num else comp.value
         voltage_table = config.get("capacitor_voltage_by_size") or {}
         voltage = voltage_table.get(size, "50V")
@@ -507,8 +644,19 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "D":
-        size = comp.size or ""
-        parts = ["贴片二极管", comp.model, size, brand]
+        parts = ["贴片二极管", comp.model, package, brand]
+        return pn, ",".join([p for p in parts if p])
+
+    if comp.kind == "IC":
+        parts = ["贴片集成电路", comp.model, package, brand]
+        return pn, ",".join([p for p in parts if p])
+
+    if comp.kind == "Q":
+        parts = ["贴片三极管", comp.model, package, brand]
+        return pn, ",".join([p for p in parts if p])
+
+    if comp.kind == "MOS":
+        parts = ["贴片MOS管", comp.model, package, brand]
         return pn, ",".join([p for p in parts if p])
 
     return pn, comp.value

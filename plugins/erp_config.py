@@ -16,11 +16,9 @@ PLUGIN_IDENTIFIER = "com.github.YonimoC.kicad-erp-to-sch"
 
 #: 仓库内默认数据文件位置（打包后可在设置里改成 ERP 导出目录）
 DEFAULT_ERP_FILE = r"D:\_LWH\KiCad Lib\Addons\ERP-To-SCH\原材料基础数据 copy.xls"
-DEFAULT_RULES_FILE = r"D:\_LWH\KiCad Lib\Addons\ERP-To-SCH\物料参数要求表20260709 copy.xlsx"
 
 DEFAULTS: Dict[str, Any] = {
     "erp_file": DEFAULT_ERP_FILE,
-    "rules_file": DEFAULT_RULES_FILE,
     "last_project_dir": "",
 
     # 品牌优选顺序（越小越优先）。国巨 = YAGEO，写成两种别名都认。
@@ -150,10 +148,6 @@ class Config:
     @property
     def erp_file(self) -> str:
         return str(self.get("erp_file"))
-
-    @property
-    def rules_file(self) -> str:
-        return str(self.get("rules_file"))
 
     @property
     def cache_dir(self) -> Path:

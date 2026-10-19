@@ -163,6 +163,14 @@ def process_hint_dirs() -> List[str]:
                         hints.append(os.path.dirname(os.path.abspath(arg)))
             except Exception:
                 pass
+            try:
+                # KiCad 正开着的工程文件/原理图文件（最可靠的线索）
+                for opened in proc.open_files():
+                    path = opened.path
+                    if path.lower().endswith((".kicad_pro", ".kicad_sch")):
+                        hints.append(os.path.dirname(os.path.abspath(path)))
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -202,3 +210,43 @@ def find_project_file(schematic_path: str) -> str:
         return direct
     found = glob.glob(os.path.join(folder, "*.kicad_pro"))
     return found[0] if found else ""
+
+
+def find_root_schematic(folder: str) -> str:
+    """在工程目录里找根原理图（没有被其他图纸引用的那张）。"""
+    if not folder or not os.path.isdir(folder):
+        return ""
+    files = sorted(glob.glob(os.path.join(folder, "*.kicad_sch")))
+    if not files:
+        return ""
+    if len(files) == 1:
+        return os.path.abspath(files[0])
+
+    referenced = set()
+    try:
+        import sch_sexpr
+
+        for path in files:
+            try:
+                text = sch_sexpr.load_file(path)
+                for name in sch_sexpr.sheet_files(text):
+                    referenced.add(os.path.normcase(
+                        os.path.abspath(os.path.join(folder, name))))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    roots = [f for f in files if os.path.normcase(os.path.abspath(f)) not in referenced]
+    if not roots:
+        roots = files
+
+    projects = glob.glob(os.path.join(folder, "*.kicad_pro"))
+    stem = (os.path.splitext(os.path.basename(projects[0]))[0] if projects
+            else os.path.basename(os.path.abspath(folder)))
+    for path in roots:
+        if os.path.splitext(os.path.basename(path))[0].lower() == stem.lower():
+            return os.path.abspath(path)
+
+    roots.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return os.path.abspath(roots[0])

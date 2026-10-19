@@ -1,9 +1,4 @@
-"""核心逻辑离线测试（不启动 KiCad）。
-
-运行:
-    set PYTHONPATH=%TEMP%\erptest\Lib\site-packages
-    D:\KiCad\10.0\bin\python.exe _dev\test_core.py
-"""
+"""核心逻辑离线测试（不启动 KiCad）。"""
 
 import os
 import sys
@@ -14,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
 os.environ.setdefault("ERP_TO_SCH_SETTINGS_DIR", tempfile.mkdtemp(prefix="erp-to-sch-"))
 
-# KiCad 自带的 python 不读 PYTHONPATH，这里手动加上测试依赖目录
 _extra = Path(os.environ.get("TEMP", "")) / "erptest" / "Lib" / "site-packages"
 if _extra.is_dir() and str(_extra) not in sys.path:
     sys.path.insert(0, str(_extra))
@@ -43,7 +37,6 @@ SAMPLE = """(kicad_sch
 \t\t(property "Reference" "R1" (at 102 99 0) (effects (font (size 1.27 1.27))))
 \t\t(property "Value" "10K" (at 102 101 0) (effects (font (size 1.27 1.27))))
 \t\t(property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
-\t\t(property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
 \t)
 \t(symbol
 \t\t(lib_id "Device:R")
@@ -74,21 +67,48 @@ SAMPLE = """(kicad_sch
 \t\t(property "Footprint" "Diode_SMD:D_SOD-123" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
 \t)
 \t(symbol
-\t\t(lib_id "Device:R")
-\t\t(at 180 100 0)
+\t\t(lib_id "Device:LED")
+\t\t(at 170 100 0)
 \t\t(unit 1)
 \t\t(uuid "aaaaaaaa-0000-0000-0000-000000000005")
-\t\t(property "Reference" "R3" (at 182 99 0) (effects (font (size 1.27 1.27))))
-\t\t(property "Value" "4K7" (at 182 101 0) (effects (font (size 1.27 1.27))))
-\t\t(property "Footprint" "Resistor_SMD:R_0805_2012Metric" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+\t\t(property "Reference" "D2" (at 172 99 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Value" "LED_G_0603_LTST-C190GKT" (at 172 101 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Footprint" "LED_SMD:LED_0603_1608Metric" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+\t)
+\t(symbol
+\t\t(lib_id "Amplifier_Operational:LM358")
+\t\t(at 180 100 0)
+\t\t(unit 1)
+\t\t(uuid "aaaaaaaa-0000-0000-0000-000000000006")
+\t\t(property "Reference" "U1" (at 182 99 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Value" "LM358" (at 182 101 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+\t)
+\t(symbol
+\t\t(lib_id "Device:Q_NPN_BEC")
+\t\t(at 190 100 0)
+\t\t(unit 1)
+\t\t(uuid "aaaaaaaa-0000-0000-0000-000000000007")
+\t\t(property "Reference" "Q1" (at 192 99 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Value" "BC847C" (at 192 101 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Footprint" "Package_TO_SOT_SMD:SOT-23" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+\t)
+\t(symbol
+\t\t(lib_id "Device:Q_NMOS_GSD")
+\t\t(at 200 100 0)
+\t\t(unit 1)
+\t\t(uuid "aaaaaaaa-0000-0000-0000-000000000008")
+\t\t(property "Reference" "Q2" (at 202 99 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Value" "AO3400A" (at 202 101 0) (effects (font (size 1.27 1.27))))
+\t\t(property "Footprint" "Package_TO_SOT_SMD:SOT-23" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
 \t)
 \t(symbol
 \t\t(lib_id "power:GND")
-\t\t(at 200 100 0)
+\t\t(at 220 100 0)
 \t\t(unit 1)
-\t\t(uuid "aaaaaaaa-0000-0000-0000-000000000006")
-\t\t(property "Reference" "#PWR01" (at 200 106 0) (effects (font (size 1.27 1.27)) (hide yes)))
-\t\t(property "Value" "GND" (at 200 104 0) (effects (font (size 1.27 1.27))))
+\t\t(uuid "aaaaaaaa-0000-0000-0000-000000000009")
+\t\t(property "Reference" "#PWR01" (at 220 106 0) (effects (font (size 1.27 1.27)) (hide yes)))
+\t\t(property "Value" "GND" (at 220 104 0) (effects (font (size 1.27 1.27))))
 \t)
 )
 """
@@ -96,17 +116,12 @@ SAMPLE = """(kicad_sch
 
 def main() -> int:
     cfg = erp_config.Config()
-    print("配置:", cfg.path)
+    materials = load_materials(cfg.erp_file, cfg.cache_dir)
+    parsed = [erp_match.parse_material(m, cfg) for m in materials if not m.disabled]
+    print(f"物料 {len(materials)} 条（可用解析 {len(parsed)}）")
 
     symbols = sch_sexpr.read_symbols(SAMPLE)
-    print(f"解析到 {len(symbols)} 个 symbol 实例")
-    for s in symbols:
-        print(" ", s.reference, s.value, s.footprint, "PN=", s.partnumber or "-")
-
-    materials = load_materials(cfg.erp_file, cfg.cache_dir)
-    print(f"物料 {len(materials)} 条")
-
-    edits = []
+    results = {}
     for symbol in symbols:
         comp = erp_match.analyze_component(
             erp_match.Component(
@@ -115,40 +130,36 @@ def main() -> int:
                 footprint=symbol.footprint, lib_id=symbol.lib_id,
                 description=symbol.description, partnumber=symbol.partnumber,
             ), cfg)
-        if not comp.kind:
-            print(f"[跳过] {comp.reference} ({comp.lib_id})")
+        if not comp.reference or comp.reference.startswith("#"):
             continue
-        candidates = erp_match.build_candidates(comp, materials, cfg)
-        chosen = erp_match.auto_select(candidates, cfg)
+        if not comp.kind:
+            print(f"[跳过] {comp.reference} {comp.value} ({comp.lib_id})")
+            results[comp.reference] = ("", "")
+            continue
+
+        candidates = erp_match.build_candidates(comp, materials, cfg, parsed)
+        chosen = erp_match.auto_select(candidates, cfg, comp.kind)
         if chosen:
-            print(f"[匹配] {comp.reference} {comp.value} {comp.size} -> {chosen.pn} "
-                  f"{chosen.description} | 品牌={chosen.brand} 库存={chosen.material.stock:g} "
-                  f"候选={len(candidates)}")
+            print(f"[匹配] {comp.reference:4s} {comp.kind:3s} {comp.value:28s} "
+                  f"-> {chosen.pn} | {chosen.description} | 库存={chosen.material.stock:g} "
+                  f"| 候选={len(candidates)}")
+            results[comp.reference] = (chosen.pn, chosen.description)
         else:
             pn, desc = erp_match.build_new_item(comp, cfg)
-            print(f"[新料] {comp.reference} {comp.value} {comp.size} -> {pn} {desc} "
-                  f"候选={len(candidates)}")
-            chosen = None
-        if chosen:
-            edits.append(sch_sexpr.plan_set_property(SAMPLE, symbol, "PartNumber", chosen.pn))
-            edits.append(sch_sexpr.plan_set_property(SAMPLE, symbol, "Description", chosen.description))
+            print(f"[新料] {comp.reference:4s} {comp.kind:3s} {comp.value:28s} -> {pn} | {desc}")
+            results[comp.reference] = (pn, desc)
 
-    out = sch_sexpr.apply_edits(SAMPLE, edits)
-    print("\n--- 写入后片段 ---")
-    for line in out.splitlines():
-        if "property" in line and ("Reference" in line or "PartNumber" in line or "Description" in line):
-            print(line)
-
-    # 再解析一次确认字段生效
-    symbols2 = sch_sexpr.read_symbols(out)
-    for s in symbols2:
-        if s.reference.startswith("#"):
-            continue
-        print(f"复核 {s.reference}: PN={s.partnumber!r} DESC={s.description!r}")
-
-    # 解析完整性：无修改时输出应与输入一致
-    assert sch_sexpr.apply_edits(SAMPLE, []) == SAMPLE
-    print("\nOK")
+    assert results["R1"][0] == "101010674", results["R1"]
+    assert results["R2"][0] == "101010646", results["R2"]
+    assert results["C1"][0].startswith("102"), results["C1"]
+    assert results["D1"][0] == "104010117", results["D1"]
+    assert results["D2"] == ("", ""), results["D2"]
+    assert results["Q1"][0] and "BC847C" in results["Q1"][1].upper(), results["Q1"]
+    assert results["Q2"][0] and "AO3400A" in results["Q2"][1].upper(), results["Q2"]
+    print("\nQ1:", results["Q1"])
+    print("Q2:", results["Q2"])
+    print("U1:", results["U1"])
+    print("OK")
     return 0
 
 
