@@ -393,6 +393,27 @@ def search_normalize(text: str) -> str:
     return raw.upper()
 
 
+def is_electronic_pn(pn: str) -> bool:
+    """电子物料的料号：1 开头且 9 位（如 101010511）。"""
+    code = (pn or "").strip()
+    return len(code) == 9 and code.startswith("1") and code.isdigit()
+
+
+def search_keyword(comp: "Component") -> str:
+    """右键搜索 ERP 时的预填关键字：类别 + 大致封装 + Value/型号。"""
+    kind = getattr(comp, "kind", "") or ""
+    label = KIND_LABELS.get(kind, "")
+    if kind in ("R", "C", "L", "X", "XO"):
+        package = getattr(comp, "size", "") or getattr(comp, "package", "") or ""
+    else:
+        package = getattr(comp, "package", "") or getattr(comp, "size", "") or ""
+    value = (getattr(comp, "model", "") or getattr(comp, "value", "") or "").strip()
+    parts = [p for p in (label, package, value) if p]
+    if not parts:
+        parts = [value] if value else []
+    return " ".join(parts)
+
+
 def _looks_like_model(token: str) -> bool:
     t = (token or "").strip()
     if len(t) < 4 or len(t) > 40:

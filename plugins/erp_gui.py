@@ -28,8 +28,10 @@ from erp_match import (
     build_generic_candidates,
     build_new_item,
     canonical_new_rule,
+    is_electronic_pn,
     is_tht_footprint,
     parse_material,
+    search_keyword,
     search_normalize,
 )
 
@@ -111,7 +113,10 @@ class MaterialSearchDialog(wx.Dialog):
         self.btn_search = wx.Button(panel, label="搜索")
         top.Add(self.btn_search, 0, wx.RIGHT, 12)
         self.chk_disabled = wx.CheckBox(panel, label="包含禁用物料")
-        top.Add(self.chk_disabled, 0, wx.ALIGN_CENTER_VERTICAL)
+        top.Add(self.chk_disabled, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 12)
+        self.chk_electronic = wx.CheckBox(panel, label="仅电子物料（1 开头 9 位料号）")
+        self.chk_electronic.SetValue(True)
+        top.Add(self.chk_electronic, 0, wx.ALIGN_CENTER_VERTICAL)
         sizer.Add(top, 0, wx.EXPAND | wx.ALL, 8)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
@@ -142,6 +147,8 @@ class MaterialSearchDialog(wx.Dialog):
         self.txt_keyword.Bind(wx.EVT_TEXT_ENTER, lambda e: self._search())
         self.btn_ok.Bind(wx.EVT_BUTTON, self._on_ok)
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_ok)
+        self.chk_disabled.Bind(wx.EVT_CHECKBOX, lambda e: self._search())
+        self.chk_electronic.Bind(wx.EVT_CHECKBOX, lambda e: self._search())
         self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_col_click)
         self._search()
 
@@ -201,11 +208,14 @@ class MaterialSearchDialog(wx.Dialog):
     def _search(self) -> None:
         keyword = search_normalize(self.txt_keyword.GetValue().strip())
         include_disabled = self.chk_disabled.GetValue()
+        only_electronic = self.chk_electronic.GetValue()
         keys = [k for k in keyword.split() if k]
 
         results: List[Material] = []
         for material in self.materials:
             if material.disabled and not include_disabled:
+                continue
+            if only_electronic and not is_electronic_pn(material.pn):
                 continue
             haystack = search_normalize(
                 f"{material.pn} {material.name} {material.spec} {material.brand}")
@@ -307,7 +317,7 @@ class CandidateDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
     def _on_search(self, _event) -> None:
-        keyword = self.row.comp.model or self.row.comp.value
+        keyword = search_keyword(self.row.comp)
         with MaterialSearchDialog(self, self.materials, keyword) as dlg:
             if dlg.ShowModal() != wx.ID_OK or dlg.material is None:
                 return
@@ -1235,7 +1245,7 @@ class ErpToSchDialog(wx.Dialog):
             wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE,
                           wx.OK | wx.ICON_INFORMATION, self)
             return
-        keyword = row.comp.model or row.comp.value
+        keyword = search_keyword(row.comp)
         with MaterialSearchDialog(self, self.materials, keyword,
                                   f"为 {row.references} 搜索物料") as dlg:
             if dlg.ShowModal() != wx.ID_OK or dlg.material is None:
