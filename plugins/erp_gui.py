@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -306,6 +307,10 @@ class ErpToSchDialog(wx.Dialog):
         self.rows: List[MatchRow] = []
         self.schematic_files: List[str] = []
         self.root_schematic = ""
+        self.sort_column = -1
+        self.sort_ascending = True
+        self._column_titles: List[str] = []
+        self._column_widths: List[int] = []
 
         self._build_ui()
         self._detect_project()
@@ -347,11 +352,10 @@ class ErpToSchDialog(wx.Dialog):
         root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        for idx, (title, width) in enumerate([
-            ("位号", 150), ("类别", 60), ("Value/型号", 150), ("封装", 90),
-            ("状态", 105), ("PartNumber", 125), ("描述", 340),
-            ("品牌", 70), ("库存", 60), ("候选", 50),
-        ]):
+        self._column_titles = ["位号", "类别", "Value/型号", "封装", "状态",
+                               "PartNumber", "描述", "品牌", "库存", "候选"]
+        self._column_widths = [150, 60, 150, 90, 105, 125, 340, 70, 60, 50]
+        for idx, (title, width) in enumerate(zip(self._column_titles, self._column_widths)):
             self.list.InsertColumn(idx, title, width=width)
         root.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
@@ -374,6 +378,8 @@ class ErpToSchDialog(wx.Dialog):
         self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
         self.btn_apply.Bind(wx.EVT_BUTTON, lambda e: self._apply())
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._activate_row())
+        self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_column_click)
+        self.list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._on_right_click)
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
     # -- 路径 -------------------------------------------------------------
@@ -526,6 +532,7 @@ class ErpToSchDialog(wx.Dialog):
         for row in self.rows:
             self._refresh_group_status(row)
 
+        self._apply_sort()
         self._refresh_list()
         matched = sum(1 for r in self.rows if r.selected or r.status == "手动")
         new_items = sum(1 for r in self.rows if r.status == "新料")
@@ -609,7 +616,18 @@ class ErpToSchDialog(wx.Dialog):
         return row
 
     # -- 列表 -------------------------------------------------------------
+    def _update_headers(self) -> None:
+        for idx, title in enumerate(self._column_titles):
+            text = title
+            if idx == self.sort_column:
+                text += " ▲" if self.sort_ascending else " ▼"
+            item = wx.ListItem()
+            item.SetText(text)
+            item.SetWidth(self._column_widths[idx])
+            self.list.SetColumn(idx, item)
+
     def _refresh_list(self) -> None:
+        self._update_headers()
         self.list.DeleteAllItems()
         for idx, row in enumerate(self.rows):
             self.list.InsertItem(idx, row.references)
@@ -629,8 +647,136 @@ class ErpToSchDialog(wx.Dialog):
             elif row.status == "手动":
                 self.list.SetItemTextColour(idx, wx.Colour(0, 70, 180))
             elif row.status in ("未自动匹配", "缺少封装", "无法识别数值",
-                                "缺少型号", "插件件跳过"):
+                                "缺少型号", "插件件跳过", "待处理"):
                 self.list.SetItemTextColour(idx, wx.Colour(120, 120, 120))
+
+    # -- 排序 -------------------------------------------------------------
+    @staticmethod
+    def _natural(text: str) -> str:
+        return re.sub(r"(\d+)", lambda m: m.group(1).zfill(6), (text or "").lower())
+
+    def _sort_key(self, row: MatchRow, column: int):
+        comp = row.comp
+        if column == 0:
+            return self._natural(row.references)
+        if column == 1:
+            return comp.kind_label
+        if column == 2:
+            return self._natural(comp.value)
+        if column == 3:
+            return comp.size or comp.package or ""
+        if column == 4:
+            return row.status
+        if column == 5:
+            return self._natural(row.pn)
+        if column == 6:
+            return self._natural(row.description)
+        if column == 7:
+            return row.brand
+        if column == 8:
+            try:
+                return float(row.stock) if row.stock else -1.0
+            except ValueError:
+                return -1.0
+        if column == 9:
+            return len(row.candidates)
+        return ""
+
+    def _apply_sort(self) -> None:
+        if self.sort_column < 0:
+            return
+        self.rows.sort(key=lambda r: self._sort_key(r, self.sort_column),
+                       reverse=not self.sort_ascending)
+
+    def _on_column_click(self, event) -> None:
+        column = event.GetColumn()
+        if column == self.sort_column:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column = column
+            self.sort_ascending = True
+        self._apply_sort()
+        self._refresh_list()
+
+    # -- 右键菜单 ---------------------------------------------------------
+    def _on_right_click(self, event) -> None:
+        index = event.GetIndex()
+        if index < 0:
+            return
+        self.list.Select(index)
+        row = self._selected_row()
+        if row is None:
+            return
+        menu = wx.Menu()
+        item_search = menu.Append(wx.ID_ANY, "搜索 ERP 物料…")
+        item_candidate = menu.Append(wx.ID_ANY, "查看候选物料…")
+        item_new = menu.Append(wx.ID_ANY, "生成新料描述（（新料）/ FH）")
+        item_manual = menu.Append(wx.ID_ANY, "手动输入 PartNumber / 描述…")
+        item_clear = menu.Append(wx.ID_ANY, "清除 PartNumber / 描述")
+        menu.AppendSeparator()
+        item_copy = menu.Append(wx.ID_ANY, "复制位号")
+        menu.Bind(wx.EVT_MENU, lambda e: self._search_material(), item_search)
+        menu.Bind(wx.EVT_MENU, lambda e: self._pick_candidate(), item_candidate)
+        menu.Bind(wx.EVT_MENU, lambda e: self._generate_new_item(), item_new)
+        menu.Bind(wx.EVT_MENU, lambda e: self._manual_edit(), item_manual)
+        menu.Bind(wx.EVT_MENU, lambda e: self._clear_row(), item_clear)
+        menu.Bind(wx.EVT_MENU, lambda e: self._copy_references(), item_copy)
+        self.list.PopupMenu(menu)
+        menu.Destroy()
+
+    def _generate_new_item(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        pn, description = build_new_item(row.comp, self.config)
+        row.selected = None
+        row.pn = pn
+        row.description = description
+        row.status = "手动"
+        row.note = "已按规则生成新料描述"
+        self._refresh_list()
+        self._log(f"{row.references}: 生成新料 {pn} / {description}")
+
+    def _manual_edit(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        with wx.TextEntryDialog(self, "物料编码（PartNumber）", "手动输入",
+                                row.pn or "（新料）") as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            pn = dlg.GetValue().strip()
+        with wx.TextEntryDialog(self, "描述（Description）", "手动输入",
+                                row.description or "") as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            description = dlg.GetValue().strip()
+        row.selected = None
+        row.pn = pn
+        row.description = description
+        row.status = "手动" if pn else "待处理"
+        row.note = "手动输入"
+        self._refresh_list()
+
+    def _clear_row(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        row.selected = None
+        row.pn = ""
+        row.description = ""
+        row.status = "待处理"
+        row.note = "已清除"
+        self._refresh_list()
+
+    def _copy_references(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(row.references))
+            wx.TheClipboard.Close()
+            self._log(f"已复制位号: {row.references}")
 
     def _selected_row(self) -> Optional[MatchRow]:
         index = self.list.GetFirstSelected()

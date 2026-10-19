@@ -434,6 +434,11 @@ def analyze_component(comp: Component, config: Config) -> Component:
     prefix_match = re.match(r"([A-Z]+)", ref)
     prefix = prefix_match.group(1) if prefix_match else ""
 
+    # 尺寸/封装/容差对任何类别都先填好（未自动匹配的元件也能一键生成描述）
+    comp.size = extract_size(comp.footprint) or extract_size(comp.value)
+    comp.package = extract_package(comp.footprint) or extract_package(comp.value)
+    comp.tolerance = parse_tolerance(comp.value)
+
     if prefix.startswith("LED"):
         return comp  # 发光二极管不匹配
     if prefix.startswith("R"):
@@ -452,10 +457,6 @@ def analyze_component(comp: Component, config: Config) -> Component:
         comp.kind = "IC"
     else:
         return comp
-
-    comp.size = extract_size(comp.footprint) or extract_size(comp.value)
-    comp.package = extract_package(comp.footprint) or extract_package(comp.value)
-    comp.tolerance = parse_tolerance(comp.value)
 
     if comp.kind == "R":
         comp.value_num = parse_resistance(comp.value)
@@ -624,7 +625,7 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
     brand = config.get("new_brand") or "FH"
     pn = config.get("new_partnumber") or "（新料）"
     size = comp.size or ""
-    package = comp.package or ""
+    package = comp.package or comp.size or ""
 
     if comp.kind == "R":
         value_text = format_resistance(comp.value_num) if comp.value_num else comp.value
@@ -659,4 +660,25 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         parts = ["贴片MOS管", comp.model, package, brand]
         return pn, ",".join([p for p in parts if p])
 
-    return pn, comp.value
+    # 未自动匹配的类型（LED / 连接器 / 开关…）：按"名称,型号,封装,品牌"生成
+    parts = [guess_category_name(comp), comp.model or comp.value, package, brand]
+    return pn, ",".join([p for p in parts if p])
+
+
+def guess_category_name(comp: Component) -> str:
+    """给未自动匹配的元件猜一个物料名称，用于一键生成新料描述。"""
+    lib = (comp.lib_id or "").lower()
+    value = (comp.value or "").upper()
+    if "led" in lib or value.startswith("LED"):
+        return "贴片发光二极管"
+    if any(k in lib for k in ("conn", "jack", "usb", "header", "terminal", "socket")):
+        return "贴片连接器"
+    if "switch" in lib or "sw_" in lib:
+        return "贴片轻触开关"
+    if "crystal" in lib or "resonator" in lib:
+        return "贴片晶振"
+    if "fuse" in lib:
+        return "贴片保险丝"
+    if "inductor" in lib or lib.startswith("device:l"):
+        return "贴片电感"
+    return "贴片元件"
