@@ -19,8 +19,8 @@ from test_core import SAMPLE  # noqa: E402
 
 def dump(dlg, limit: int = 12) -> None:
     for row in dlg.rows[:limit]:
-        print(f"  {row.comp.reference:5s} {row.comp.kind:3s} {row.comp.value:28s} "
-              f"{row.status:8s} {row.pn:14s} {row.description[:70]}")
+        print(f"  {row.references:14s} x{row.member_count:<2d} {row.comp.kind:3s} "
+              f"{row.comp.value:22s} {row.status:8s} {row.pn:14s} {row.description[:60]}")
 
 
 def main() -> int:
@@ -36,13 +36,19 @@ def main() -> int:
     dlg._scan()
     dump(dlg)
 
+    r_group = next(r for r in dlg.rows if r.comp.reference == "R1")
+    print("R1 分组:", r_group.references, "members=", r_group.member_count)
+    assert r_group.member_count == 3, r_group.references
+    assert len(dlg.rows) == 8, [r.references for r in dlg.rows]
+
     by_file = {}
     for row in dlg.rows:
         if row.pn and row.status != "已是最新":
-            by_file.setdefault(row.comp.file, []).append(row)
+            for comp in row.members:
+                by_file.setdefault(comp.file, []).append((row, comp))
     total = 0
-    for path, rows in by_file.items():
-        total += dlg._write_file(path, rows)
+    for path, entries in by_file.items():
+        total += dlg._write_file(path, entries)
     print(f"写入 {total} 个元件")
 
     dlg.rows = []
@@ -53,6 +59,7 @@ def main() -> int:
     print("重新扫描状态:", states)
     assert states.get("已是最新", 0) + states.get("未自动匹配", 0) == len(dlg.rows), states
     assert states.get("未自动匹配", 0) == 1, states  # 只有 LED
+    assert len(dlg.rows) == 8, len(dlg.rows)
 
     src = Path(r"D:\KiCad\10.0\share\kicad\demos\complex_hierarchy")
     work2 = Path(tempfile.mkdtemp(prefix="erp-tht-")) / src.name
@@ -62,13 +69,13 @@ def main() -> int:
     dlg._scan()
     for row in dlg.rows:
         if row.status not in ("插件件跳过", "未自动匹配"):
-            print(f"  {row.comp.reference:6s} {row.comp.kind:3s} {row.comp.value:16s} "
-                  f"{row.comp.footprint:50s} {row.status:8s} {row.pn:12s} {row.description[:60]}")
+            print(f"  {row.references:12s} x{row.member_count:<2d} {row.comp.kind:3s} "
+                  f"{row.comp.value:16s} {row.comp.footprint:45s} {row.status:8s} {row.pn:12s}")
     states = {}
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
     print("状态统计:", states)
-    assert states.get("插件件跳过", 0) >= 30, states
+    assert states.get("插件件跳过", 0) >= 20, states
     assert states.get("已是最新", 0) == 0, states
 
     dlg.Destroy()

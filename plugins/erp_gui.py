@@ -41,8 +41,22 @@ class MatchRow:
     pn: str = ""
     description: str = ""
     note: str = ""
-    #: 多单元符号的其余单元（写入时一起更新）
-    extra_uuids: List[str] = field(default_factory=list)
+    #: 同一 Value + 封装组合下的所有元件（含多单元符号），写入时全部更新
+    members: List[Component] = field(default_factory=list)
+
+    @property
+    def member_count(self) -> int:
+        return max(1, len(self.members))
+
+    @property
+    def references(self) -> str:
+        refs: List[str] = []
+        for comp in (self.members or [self.comp]):
+            if comp.reference not in refs:
+                refs.append(comp.reference)
+        if len(refs) <= 4:
+            return ", ".join(refs)
+        return f"{', '.join(refs[:3])} 等 {len(refs)} 个"
 
     @property
     def brand(self) -> str:
@@ -181,7 +195,7 @@ class CandidateDialog(wx.Dialog):
         panel = wx.Panel(self)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        info = (f"位号 {row.comp.reference}    型号/数值 {row.comp.value}    "
+        info = (f"位号 {row.references}    型号/数值 {row.comp.value}    "
                 f"封装 {row.comp.footprint or '-'}")
         sizer.Add(wx.StaticText(panel, label=info), 0, wx.ALL, 8)
 
@@ -334,8 +348,8 @@ class ErpToSchDialog(wx.Dialog):
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for idx, (title, width) in enumerate([
-            ("位号", 100), ("类别", 60), ("Value/型号", 150), ("封装", 90),
-            ("状态", 105), ("PartNumber", 125), ("描述", 360),
+            ("位号", 150), ("类别", 60), ("Value/型号", 150), ("封装", 90),
+            ("状态", 105), ("PartNumber", 125), ("描述", 340),
             ("品牌", 70), ("库存", 60), ("候选", 50),
         ]):
             self.list.InsertColumn(idx, title, width=width)
@@ -496,25 +510,56 @@ class ErpToSchDialog(wx.Dialog):
             return
         del cursor
 
-        # 多单元元件（U1A/U1B）在文件里是多个 symbol，合并成一行显示，写入时全部更新
+        # 按「Value + 封装」分组：完全相同的元件只匹配一次，显示成一行
+        groups: Dict[Tuple[str, str, str, str], MatchRow] = {}
         unique: List[MatchRow] = []
-        grouped: Dict[Tuple[str, str], MatchRow] = {}
         for row in self.rows:
-            key = (row.comp.file, row.comp.reference)
-            primary = grouped.get(key)
+            key = self._group_key(row.comp)
+            primary = groups.get(key)
             if primary is not None:
-                primary.extra_uuids.append(row.comp.uuid)
+                primary.members.append(row.comp)
             else:
-                row.extra_uuids = [row.comp.uuid]
-                grouped[key] = row
+                row.members = [row.comp]
+                groups[key] = row
                 unique.append(row)
         self.rows = unique
+        for row in self.rows:
+            self._refresh_group_status(row)
 
         self._refresh_list()
         matched = sum(1 for r in self.rows if r.selected or r.status == "手动")
         new_items = sum(1 for r in self.rows if r.status == "新料")
-        self._log(f"原理图 {os.path.basename(root)}：共 {len(self.rows)} 个元件"
-                  f"（跳过电源符号 {skipped} 个），命中现有料 {matched}，新料 {new_items}。")
+        self._log(f"原理图 {os.path.basename(root)}：共 {sum(r.member_count for r in self.rows)} 个元件、"
+                  f"{len(self.rows)} 组（跳过电源符号 {skipped} 个），"
+                  f"命中现有料 {matched} 组，新料 {new_items} 组。")
+
+    def _group_key(self, comp: Component) -> Tuple[str, str, str, str]:
+        """分组依据：类别 + 数值/型号 + 容差 + 封装。"""
+        if comp.kind == "R" and comp.value_num is not None:
+            value = f"R{comp.value_num:.6g}"
+        elif comp.kind == "C" and comp.value_num is not None:
+            value = f"C{comp.value_num:.6g}"
+        else:
+            value = (comp.model or comp.value or "").strip().upper()
+        tolerance = f"{comp.tolerance:g}" if comp.tolerance else ""
+        return (comp.kind, value, tolerance, (comp.footprint or "").strip().upper())
+
+    def _refresh_group_status(self, row: MatchRow) -> None:
+        """整组都已写入目标值时才显示"已是最新"。"""
+        if not row.pn:
+            return
+        all_current = True
+        for comp in row.members:
+            if row.pn != comp.partnumber:
+                all_current = False
+                break
+            if row.description and row.description != comp.description:
+                all_current = False
+                break
+        if all_current:
+            row.status = "已是最新"
+        elif row.status == "已是最新":
+            row.status = "已匹配" if row.selected else "新料"
 
     def _match_component(self, comp: Component) -> MatchRow:
         row = MatchRow(comp=comp)
@@ -567,7 +612,7 @@ class ErpToSchDialog(wx.Dialog):
     def _refresh_list(self) -> None:
         self.list.DeleteAllItems()
         for idx, row in enumerate(self.rows):
-            self.list.InsertItem(idx, row.comp.reference)
+            self.list.InsertItem(idx, row.references)
             self.list.SetItem(idx, 1, row.comp.kind_label)
             self.list.SetItem(idx, 2, row.comp.value)
             self.list.SetItem(idx, 3, row.comp.size or row.comp.package or "-")
@@ -641,7 +686,7 @@ class ErpToSchDialog(wx.Dialog):
             return
         keyword = row.comp.model or row.comp.value
         with MaterialSearchDialog(self, self.materials, keyword,
-                                  f"为 {row.comp.reference} 搜索物料") as dlg:
+                                  f"为 {row.references} 搜索物料") as dlg:
             if dlg.ShowModal() != wx.ID_OK or dlg.material is None:
                 return
             self._assign_material(row, dlg.material)
@@ -659,15 +704,15 @@ class ErpToSchDialog(wx.Dialog):
             return
 
         todo = [r for r in self.rows
-                if r.pn and r.status != "已是最新"
-                and ((r.pn != r.comp.partnumber)
-                     or (r.description and r.description != r.comp.description))]
+                if r.pn and r.status != "已是最新" and self._row_needs_update(r)]
         if not todo:
             wx.MessageBox("没有需要写入的改动。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
             return
 
+        total_components = sum(r.member_count for r in todo)
+        files = {c.file for r in todo for c in r.members}
         answer = wx.MessageBox(
-            f"将写入 {len(todo)} 个元件到 {len(set(r.comp.file for r in todo))} 个原理图文件。\n\n"
+            f"将写入 {len(todo)} 组 / {total_components} 个元件到 {len(files)} 个原理图文件。\n\n"
             "写入后会尝试让 KiCad 自动重新加载原理图；\n"
             "重新加载会丢弃内存里尚未保存的修改，请先按 Ctrl+S 保存。\n\n"
             "继续吗？",
@@ -675,16 +720,17 @@ class ErpToSchDialog(wx.Dialog):
         if answer != wx.YES:
             return
 
-        by_file: Dict[str, List[MatchRow]] = {}
+        by_file: Dict[str, List[Tuple[MatchRow, Component]]] = {}
         for row in todo:
-            by_file.setdefault(row.comp.file, []).append(row)
+            for comp in row.members:
+                by_file.setdefault(comp.file, []).append((row, comp))
 
         written = 0
         failures: List[str] = []
         cursor = wx.BusyCursor()
-        for path, rows in by_file.items():
+        for path, entries in by_file.items():
             try:
-                written += self._write_file(path, rows)
+                written += self._write_file(path, entries)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"{os.path.basename(path)}: {exc}")
                 self._log(traceback.format_exc())
@@ -698,8 +744,8 @@ class ErpToSchDialog(wx.Dialog):
         refreshed = False
         if written and not failures:
             try:
-                refreshed, info = kicad_ui.refresh_schematic(self.root_schematic or
-                                                             todo[0].comp.file)
+                refreshed, info = kicad_ui.refresh_schematic(
+                    self.root_schematic or todo[0].members[0].file)
                 message += f"\n\n{info}"
             except Exception as exc:  # noqa: BLE001
                 self._log(traceback.format_exc())
@@ -710,24 +756,31 @@ class ErpToSchDialog(wx.Dialog):
         wx.MessageBox(message, APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
         self._log(message)
 
-    def _write_file(self, path: str, rows: Sequence[MatchRow]) -> int:
+    def _row_needs_update(self, row: MatchRow) -> bool:
+        for comp in row.members:
+            if row.pn and row.pn != comp.partnumber:
+                return True
+            if row.description and row.description != comp.description:
+                return True
+        return False
+
+    def _write_file(self, path: str, entries: Sequence[Tuple[MatchRow, Component]]) -> int:
         text = sch_sexpr.load_file(path)
         symbols = {s.uuid: s for s in sch_sexpr.read_symbols(text)}
 
         edits = []
         count = 0
-        for row in rows:
+        for row, comp in entries:
+            symbol = symbols.get(comp.uuid)
+            if symbol is None:
+                continue
             changed = False
-            for uuid in (row.extra_uuids or [row.comp.uuid]):
-                symbol = symbols.get(uuid)
-                if symbol is None:
-                    continue
-                if row.pn and row.pn != symbol.get_field("PartNumber"):
-                    edits.append(sch_sexpr.plan_set_property(text, symbol, "PartNumber", row.pn))
-                    changed = True
-                if row.description and row.description != symbol.get_field("Description"):
-                    edits.append(sch_sexpr.plan_set_property(text, symbol, "Description", row.description))
-                    changed = True
+            if row.pn and row.pn != symbol.get_field("PartNumber"):
+                edits.append(sch_sexpr.plan_set_property(text, symbol, "PartNumber", row.pn))
+                changed = True
+            if row.description and row.description != symbol.get_field("Description"):
+                edits.append(sch_sexpr.plan_set_property(text, symbol, "Description", row.description))
+                changed = True
             if changed:
                 count += 1
 
