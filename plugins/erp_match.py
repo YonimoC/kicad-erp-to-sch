@@ -621,7 +621,10 @@ def auto_select(candidates: Sequence[Candidate], config: Config,
 # 新建物料
 # --------------------------------------------------------------------------
 def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
-    """返回 (PartNumber, 描述)。字段顺序遵循内置的《物料参数要求表》。"""
+    """返回 (PartNumber, 描述)。字段顺序遵循内置的《物料参数要求表》。
+
+    注意：只有电阻/电容的新料才补品牌（FH），其它类别不写品牌。
+    """
     brand = config.get("new_brand") or "FH"
     pn = config.get("new_partnumber") or "（新料）"
     size = comp.size or ""
@@ -645,23 +648,23 @@ def build_new_item(comp: Component, config: Config) -> Tuple[str, str]:
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "D":
-        parts = ["贴片二极管", comp.model, package, brand]
+        parts = ["贴片二极管", comp.model, package]
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "IC":
-        parts = ["贴片集成电路", comp.model, package, brand]
+        parts = ["贴片集成电路", comp.model, package]
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "Q":
-        parts = ["贴片三极管", comp.model, package, brand]
+        parts = ["贴片三极管", comp.model, package]
         return pn, ",".join([p for p in parts if p])
 
     if comp.kind == "MOS":
-        parts = ["贴片MOS管", comp.model, package, brand]
+        parts = ["贴片MOS管", comp.model, package]
         return pn, ",".join([p for p in parts if p])
 
-    # 未自动匹配的类型（LED / 连接器 / 开关…）：按"名称,型号,封装,品牌"生成
-    parts = [guess_category_name(comp), comp.model or comp.value, package, brand]
+    # 未自动匹配的类型（LED / 连接器 / 开关…）：按"名称,型号,封装"生成，不写品牌
+    parts = [guess_category_name(comp), comp.model or comp.value, package]
     return pn, ",".join([p for p in parts if p])
 
 

@@ -177,6 +177,41 @@ def main() -> int:
     print("\nQ1:", results["Q1"])
     print("Q2:", results["Q2"])
     print("U1:", results["U1"])
+
+    # 新料描述：只有电阻/电容带 FH
+    def fake(kind: str, value: str):
+        comp = erp_match.Component(file="x", uuid="u", reference="X1",
+                                   value=value, footprint="", lib_id="")
+        comp.kind = kind
+        comp.model = value
+        comp.size = "0603"
+        comp.package = "SOT-23" if kind in ("D", "Q", "MOS", "IC") else ""
+        if kind == "R":
+            comp.value_num = erp_match.parse_resistance(value)
+        elif kind == "C":
+            comp.value_num = erp_match.parse_capacitance(value)
+        return comp
+
+    for kind, value, expect_brand in [
+        ("R", "13K", True),
+        ("C", "3.3nF", True),
+        ("D", "BAT54", False),
+        ("IC", "NE555", False),
+        ("Q", "S8050", False),
+        ("MOS", "AO3400", False),
+    ]:
+        pn, desc = erp_match.build_new_item(fake(kind, value), cfg)
+        print(f"new item {kind:3s}: {desc}")
+        assert desc.endswith(",FH") == expect_brand, (kind, desc)
+
+    led = erp_match.Component(file="x", uuid="u2", reference="D9",
+                              value="LED_G_0603", footprint="LED_SMD:LED_0603_1608Metric",
+                              lib_id="Device:LED")
+    led.size = "0603"
+    pn, desc = erp_match.build_new_item(led, cfg)
+    print("new item LED:", desc)
+    assert "FH" not in desc, desc
+
     print("OK")
     return 0
 

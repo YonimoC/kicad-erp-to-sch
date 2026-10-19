@@ -79,6 +79,7 @@ DEFAULTS: Dict[str, Any] = {
     "new_resistor_tolerance": "±5%",
     "new_capacitor_tolerance": "±10%",
     "new_capacitor_dielectric": "X7R",
+    # 仅电阻/电容新料才补品牌（其它类别不写品牌）
     "new_brand": "FH",
     "new_partnumber": "（新料）",
 }
