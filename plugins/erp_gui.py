@@ -17,10 +17,12 @@ from erp_data import Material, load_materials, read_rules, rule_example, RuleRow
 from erp_match import (
     Candidate,
     Component,
+    ParsedMaterial,
     analyze_component,
     auto_select,
     build_candidates,
     build_new_item,
+    parse_material,
 )
 
 APP_TITLE = "ERP 物料匹配（PartNumber / Description）"
@@ -140,6 +142,7 @@ class ErpToSchDialog(wx.Dialog):
         super().__init__(parent, title=APP_TITLE, size=(1240, 720))
         self.config = Config()
         self.materials: List[Material] = []
+        self.parsed_materials: List[ParsedMaterial] = []
         self.rules: List[RuleRow] = []
         self.rows: List[MatchRow] = []
         self.schematic_files: List[str] = []
@@ -271,6 +274,8 @@ class ErpToSchDialog(wx.Dialog):
         try:
             if force or not self.materials:
                 self.materials = load_materials(erp, self.config.cache_dir)
+                self.parsed_materials = [parse_material(m, self.config)
+                                         for m in self.materials if not m.disabled]
         except Exception as exc:  # noqa: BLE001
             errors.append(f"物料表读取失败: {exc}")
         try:
@@ -364,7 +369,8 @@ class ErpToSchDialog(wx.Dialog):
             row.note = "无法从 Footprint 识别尺寸"
             return row
 
-        row.candidates = build_candidates(comp, self.materials, self.config)
+        row.candidates = build_candidates(comp, self.materials, self.config,
+                                          self.parsed_materials)
         chosen = auto_select(row.candidates, self.config)
         if chosen is not None:
             row.selected = chosen

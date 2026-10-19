@@ -438,15 +438,21 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
 
 
 def build_candidates(comp: Component, materials: Iterable[Material],
-                     config: Config) -> List[Candidate]:
-    """返回按优先级排序的候选（含非优选品牌，供人工挑选）。"""
+                     config: Config,
+                     parsed_materials: Optional[Sequence[ParsedMaterial]] = None) -> List[Candidate]:
+    """返回按优先级排序的候选（含非优选品牌，供人工挑选）。
+
+    ``parsed_materials`` 可传入预先解析好的整体物料表，避免每个元件都重新解析 1.5 万行。
+    """
     if not comp.kind:
         return []
+    if parsed_materials is None:
+        parsed_materials = [parse_material(m, config) for m in materials if not m.disabled]
+
     result: List[Candidate] = []
-    for material in materials:
-        if material.disabled:
+    for parsed in parsed_materials:
+        if parsed.material.disabled:
             continue
-        parsed = parse_material(material, config)
         if not _material_matches(comp, parsed):
             continue
         candidate = Candidate(parsed=parsed, brand_rank=_brand_rank(parsed.brand, config, comp.kind))
