@@ -684,6 +684,10 @@ class SplitButton(wx.Panel):
         self.btn_arrow.Enable(enable)
         return ok
 
+    def EnableAction(self, enable: bool) -> None:  # noqa: N802 (wx 风格)
+        """只启用/禁用主按钮；右侧 ▾ 始终可点，方便重新打开选择面板。"""
+        self.btn_main.Enable(enable)
+
     def SetToolTip(self, *args, **kwargs) -> None:  # noqa: N802 (wx 风格)
         super().SetToolTip(*args, **kwargs)
         for button in (self.btn_main, self.btn_arrow):
@@ -1064,6 +1068,8 @@ class ErpToSchDialog(wx.Dialog):
             self.btn_match.SetLabel("匹配")
         else:
             self.btn_match.SetLabel(f"匹配（{len(enabled)}/{len(kinds)} 类）")
+        # 一个类别都没选时只禁主按钮，右侧 ▾ 保持可点（否则再也打不开了）
+        self.btn_match.EnableAction(not kinds or bool(enabled))
         self.btn_match.SetToolTip(
             "左侧单击：开始匹配；右侧 ▾：选择要匹配的类别"
             "（当前：" + ("、".join(self._kind_label(k) for k in enabled) or "无") + "）")
@@ -1489,7 +1495,8 @@ class ErpToSchDialog(wx.Dialog):
     def _update_apply_label(self) -> None:
         enabled = [k for k, v in self.write_filters.items() if v]
         self.btn_apply.SetLabel("写入原理图" if len(enabled) == 3 else f"写入原理图（{'/'.join(enabled) or '无'}）")
-        self.btn_apply.Enable(bool(enabled))
+        # 只禁主按钮，右侧 ▾ 保持可点，否则用户勾空了就再也打不开面板
+        self.btn_apply.EnableAction(bool(enabled))
         self.btn_apply.SetToolTip(
             "左侧单击：写入原理图；右侧 ▾：选择写入范围"
             "（当前：" + ("、".join(enabled) or "未选择") + "）")
