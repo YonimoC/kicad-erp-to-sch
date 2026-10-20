@@ -503,6 +503,71 @@ class NewItemDialog(wx.Dialog):
 
 
 # --------------------------------------------------------------------------
+# 可勾选的下拉面板（勾选后不消失，点外面才关闭）
+# --------------------------------------------------------------------------
+class CheckPopup(wx.PopupTransientWindow):
+    """弹出式多选面板：上面带全选，下面一排复选框。
+
+    用 PopupTransientWindow 而不是 Menu，勾选/取消勾选后**不会关闭**，
+    可以连续改多项；点面板外面或按 Esc 才消失。
+    """
+
+    def __init__(self, parent: wx.Window, title: str,
+                 items: Sequence[Tuple[str, str, bool]],
+                 on_toggle, on_all=None):
+        super().__init__(parent, wx.BORDER_SIMPLE)
+        self.on_toggle = on_toggle
+        self.checks: Dict[str, wx.CheckBox] = {}
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(wx.StaticText(self, label=title), 0, wx.ALL, 8)
+
+        grid = wx.FlexGridSizer(0, 2, 6, 10)
+        for key, label, checked in items:
+            check = wx.CheckBox(self, label=label)
+            check.SetValue(bool(checked))
+            check.Bind(wx.EVT_CHECKBOX,
+                       lambda event, k=key: self._on_check(k, event.IsChecked()))
+            grid.Add(check)
+            self.checks[key] = check
+        sizer.Add(grid, 0, wx.LEFT | wx.RIGHT, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        btn_all = wx.Button(self, label="全选", style=wx.BU_EXACTFIT)
+        btn_none = wx.Button(self, label="全不选", style=wx.BU_EXACTFIT)
+        btn_close = wx.Button(self, label="关闭", style=wx.BU_EXACTFIT)
+        btn_all.Bind(wx.EVT_BUTTON,
+                     lambda e: self._set_all(True, on_all))
+        btn_none.Bind(wx.EVT_BUTTON,
+                      lambda e: self._set_all(False, on_all))
+        btn_close.Bind(wx.EVT_BUTTON, lambda e: self.Dismiss())
+        buttons.Add(btn_all, 0, wx.RIGHT, 6)
+        buttons.Add(btn_none, 0, wx.RIGHT, 6)
+        buttons.Add(btn_close, 0)
+        sizer.Add(buttons, 0, wx.ALL, 8)
+
+        self.SetSizer(sizer)
+        sizer.Fit(self)
+
+    def _on_check(self, key: str, checked: bool) -> None:
+        try:
+            self.on_toggle(key, checked)
+        except Exception:
+            pass
+
+    def _set_all(self, value: bool, on_all) -> None:
+        for key, check in self.checks.items():
+            check.SetValue(value)
+            self._on_check(key, value)
+        if on_all:
+            try:
+                on_all(value)
+            except Exception:
+                pass
+        self.Layout()
+
+
+# --------------------------------------------------------------------------
 # 主对话框
 # --------------------------------------------------------------------------
 class ErpToSchDialog(wx.Dialog):
@@ -823,7 +888,7 @@ class ErpToSchDialog(wx.Dialog):
         return self.match_kinds.get(comp.kind or "", True)
 
     def _on_match_menu(self) -> None:
-        """匹配类别下拉：勾选要参与自动匹配的元件类别。"""
+        """匹配类别下拉（弹出面板，勾选后不关闭）。"""
         kinds: List[str] = []
         for row in self.rows:
             key = row.comp.kind or ""
@@ -834,28 +899,22 @@ class ErpToSchDialog(wx.Dialog):
                           wx.OK | wx.ICON_INFORMATION, self)
             return
         kinds.sort(key=lambda k: (k == "", k))
-        menu = wx.Menu()
-        id_to_key: Dict[int, str] = {}
-        for key in kinds:
-            item = menu.AppendCheckItem(wx.ID_ANY, self._kind_label(key))
-            item.Check(self.match_kinds.get(key, True))
-            id_to_key[item.GetId()] = key
-        menu.AppendSeparator()
-        item_all = menu.Append(wx.ID_ANY, "全选")
+        items = [(k, self._kind_label(k), self.match_kinds.get(k, True)) for k in kinds]
 
-        def on_choose(event) -> None:
-            key = id_to_key.get(event.GetId())
-            if key is not None:
-                self.match_kinds[key] = not self.match_kinds.get(key, True)
-            elif event.GetId() == item_all.GetId():
-                for k in kinds:
-                    self.match_kinds[k] = True
+        def toggle(key: str, checked: bool) -> None:
+            self.match_kinds[key] = checked
             self._update_match_label(kinds)
 
-        menu.Bind(wx.EVT_MENU, on_choose)
-        pos = self.btn_match_opts.ClientToScreen(wx.Point(0, self.btn_match_opts.GetSize().height))
-        self.PopupMenu(menu, self.ScreenToClient(pos))
-        menu.Destroy()
+        def on_all(value: bool) -> None:
+            for k in kinds:
+                self.match_kinds[k] = value
+            self._update_match_label(kinds)
+
+        popup = CheckPopup(self, "选择要参与匹配的类别（勾选不关闭）", items, toggle, on_all)
+        pos = self.btn_match_opts.ClientToScreen(
+            wx.Point(0, self.btn_match_opts.GetSize().height))
+        popup.Position(pos, (0, 0))
+        popup.Popup()
 
     def _update_match_label(self, kinds: Optional[List[str]] = None) -> None:
         if kinds is None:
@@ -1272,32 +1331,26 @@ class ErpToSchDialog(wx.Dialog):
 
     # -- 写入 -------------------------------------------------------------
     def _on_write_menu(self) -> None:
-        """写入范围下拉：勾选已匹配 / 新料 / 手动修改。"""
-        menu = wx.Menu()
-        labels = {"已匹配": "写入已匹配的物料",
-                  "新料": "写入新料（PartNumber 写「新料」）",
-                  "手动": "写入手动修改的"}
-        id_to_key: Dict[int, str] = {}
-        for key, label in labels.items():
-            item = menu.AppendCheckItem(wx.ID_ANY, label)
-            item.Check(self.write_filters.get(key, True))
-            id_to_key[item.GetId()] = key
-        menu.AppendSeparator()
-        item_all = menu.Append(wx.ID_ANY, "全选")
+        """写入范围下拉（弹出面板，勾选后不关闭）。"""
+        labels = [("已匹配", "写入已匹配的物料"),
+                  ("新料", "写入新料（PartNumber 写「新料」）"),
+                  ("手动", "写入手动修改的")]
+        items = [(key, label, self.write_filters.get(key, True)) for key, label in labels]
 
-        def on_choose(event) -> None:
-            key = id_to_key.get(event.GetId())
-            if key:
-                self.write_filters[key] = not self.write_filters[key]
-            elif event.GetId() == item_all.GetId():
-                for k in self.write_filters:
-                    self.write_filters[k] = True
+        def toggle(key: str, checked: bool) -> None:
+            self.write_filters[key] = checked
             self._update_apply_label()
 
-        menu.Bind(wx.EVT_MENU, on_choose)
-        pos = self.btn_apply_opts.ClientToScreen(wx.Point(0, self.btn_apply_opts.GetSize().height))
-        self.PopupMenu(menu, self.ScreenToClient(pos))
-        menu.Destroy()
+        def on_all(value: bool) -> None:
+            for key in self.write_filters:
+                self.write_filters[key] = value
+            self._update_apply_label()
+
+        popup = CheckPopup(self, "选择写入范围（勾选不关闭）", items, toggle, on_all)
+        pos = self.btn_apply_opts.ClientToScreen(
+            wx.Point(0, self.btn_apply_opts.GetSize().height))
+        popup.Position(pos, (0, 0))
+        popup.Popup()
 
     def _update_apply_label(self) -> None:
         enabled = [k for k, v in self.write_filters.items() if v]
