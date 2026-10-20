@@ -728,6 +728,11 @@ class ErpToSchDialog(wx.Dialog):
         self.match_kinds: Dict[str, bool] = {}
         #: 工程目录是否由用户手动选过（手动时优先用手动值）
         self._project_manual = False
+        #: 双击单元格就地编辑：当前编辑框与其上下文（行、字段）
+        self._editor: Optional[wx.TextCtrl] = None
+        self._editor_ctx: Optional[Tuple[MatchRow, str]] = None
+        #: 上次编辑的列（键盘回车激活时沿用）
+        self._last_edit_column = 2
 
         self._build_ui()
         self._detect_project()
@@ -807,7 +812,7 @@ class ErpToSchDialog(wx.Dialog):
         self.btn_pick.Bind(wx.EVT_BUTTON, lambda e: self._pick_candidate())
         self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search_material())
         self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
-        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._activate_row())
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._activate_row)
         self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_column_click)
         self.list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._on_right_click)
         self.Bind(wx.EVT_CLOSE, self._on_close)
@@ -1316,7 +1321,7 @@ class ErpToSchDialog(wx.Dialog):
         item_search = menu.Append(wx.ID_ANY, "搜索 ERP 物料…")
         item_candidate = menu.Append(wx.ID_ANY, "查看候选物料…")
         item_new = menu.Append(wx.ID_ANY, "生成新料描述…（可选类别）")
-        item_manual = menu.Append(wx.ID_ANY, "编辑内容…（Value / PartNumber / 描述）")
+        item_manual = menu.Append(wx.ID_ANY, "编辑内容…（弹窗，一次改 Value/PN/描述）")
         item_clear = menu.Append(wx.ID_ANY, "清除 PartNumber / 描述")
         menu.AppendSeparator()
         item_copy = menu.Append(wx.ID_ANY, "复制位号")
@@ -1395,9 +1400,146 @@ class ErpToSchDialog(wx.Dialog):
             return None
         return self.rows[index]
 
-    def _activate_row(self) -> None:
-        """双击行：编辑内容（Value / PartNumber / 描述）。"""
-        self._edit_row()
+    def _activate_row(self, event=None) -> None:
+        """双击单元格：就地把这一格变成输入框直接改（不弹新窗口）。"""
+        index = event.GetIndex() if event is not None else self.list.GetFirstSelected()
+        if index is None or index < 0:
+            index = self.list.GetFirstSelected()
+        pos = self.list.ScreenToClient(wx.GetMousePosition())
+        hit_index, _flags = self.list.HitTest(pos)
+        if hit_index == index and hit_index >= 0:
+            column = self._column_at(pos)
+        else:
+            column = self._last_edit_column
+        if column < 0:
+            column = self._last_edit_column
+        if column not in self.EDITABLE_COLUMNS:
+            self._log(f"「{self._column_titles[column] if column < len(self._column_titles) else '?'}」"
+                      "列不能直接编辑（可编辑：Value/型号、PartNumber、描述）。")
+            return
+        self._last_edit_column = column
+        self._begin_inline_edit(index, column)
+
+    # -- 单元格就地编辑 ----------------------------------------------------
+    #: 可以直接双击编辑的列 → 字段名
+    EDITABLE_COLUMNS = {2: "value", 5: "pn", 6: "description"}
+
+    def _column_at(self, pos: wx.Point) -> int:
+        """按 x 坐标算出点在哪个列（含水平滚动补偿）。"""
+        x = pos.x + self.list.GetScrollPos(wx.HORIZONTAL)
+        edge = 0
+        for column in range(self.list.GetColumnCount()):
+            edge += self.list.GetColumnWidth(column)
+            if x < edge:
+                return column
+        return -1
+
+    def _cell_rect(self, index: int, column: int) -> Optional[wx.Rect]:
+        """算出某个单元格在 ListCtrl 客户区里的矩形。"""
+        if index < 0 or index >= self.list.GetItemCount():
+            return None
+        row_rect = self.list.GetItemRect(index)
+        if not row_rect.height:
+            return None
+        x = -self.list.GetScrollPos(wx.HORIZONTAL)
+        for col in range(column):
+            x += self.list.GetColumnWidth(col)
+        width = self.list.GetColumnWidth(column)
+        if width <= 0:
+            return None
+        return wx.Rect(x, row_rect.y, width, row_rect.height)
+
+    def _cell_value(self, row: MatchRow, field: str) -> str:
+        if field == "value":
+            return row.comp.value or ""
+        if field == "pn":
+            return row.pn or ""
+        return row.description or ""
+
+    def _begin_inline_edit(self, index: int, column: int) -> None:
+        field = self.EDITABLE_COLUMNS.get(column)
+        if field is None or index < 0 or index >= len(self.rows):
+            return
+        self._commit_inline_edit()
+        rect = self._cell_rect(index, column)
+        if rect is None:
+            return
+
+        row = self.rows[index]
+        self.list.Select(index)
+        self.list.Focus(index)
+        editor = wx.TextCtrl(self.list, value=self._cell_value(row, field),
+                             style=wx.TE_PROCESS_ENTER)
+        editor.SetFont(self.list.GetFont())
+        editor.SetRect(rect)
+        editor.SetInsertionPointEnd()
+        editor.SetSelection(-1, -1)
+        self._editor = editor
+        self._editor_ctx = (row, field)
+        editor.Bind(wx.EVT_TEXT_ENTER, lambda e: self._commit_inline_edit())
+        editor.Bind(wx.EVT_KILL_FOCUS, lambda e: self._commit_inline_edit())
+        editor.Bind(wx.EVT_KEY_DOWN, self._on_editor_key)
+        editor.SetFocus()
+
+    def _on_editor_key(self, event) -> None:
+        key = event.GetKeyCode()
+        if key == wx.WXK_ESCAPE:
+            self._cancel_inline_edit()
+        elif key == wx.WXK_TAB:
+            self._commit_inline_edit()
+        else:
+            event.Skip()
+
+    def _cancel_inline_edit(self) -> None:
+        editor = self._editor
+        self._editor = None
+        self._editor_ctx = None
+        if editor is not None:
+            editor.Destroy()
+        self.list.SetFocus()
+
+    def _commit_inline_edit(self) -> None:
+        editor = self._editor
+        ctx = self._editor_ctx
+        if editor is None:
+            return
+        text = editor.GetValue()
+        self._editor = None          # 先清空，避免 Destroy 触发 KILL_FOCUS 递归
+        self._editor_ctx = None
+        editor.Destroy()
+        if ctx is None:
+            return
+        row, field = ctx
+        self._apply_inline_edit(row, field, text.strip())
+
+    def _apply_inline_edit(self, row: MatchRow, field: str, text: str) -> None:
+        if text == self._cell_value(row, field):
+            self._refresh_list()
+            return
+        if field == "value":
+            if not text:
+                self._refresh_list()
+                return
+            row.value_edit = text
+            for comp in (row.members or [row.comp]):
+                comp.value = text
+                analyze_component(comp, self.config)
+            if row.members:
+                row.comp = row.members[0]
+        elif field == "pn":
+            row.selected = None
+            row.pn = text
+        else:
+            row.selected = None
+            row.description = text
+        row.status = "手动" if (row.pn or row.description or row.value_edit) else "未匹配"
+        row.note = "手动编辑"
+        self._refresh_list()
+        self._log(f"{row.references}: 手动修改 {self._FIELD_LABELS.get(field, field)}"
+                  f" → {text or '（空）'}")
+
+    #: 日志里的字段名
+    _FIELD_LABELS = {"value": "Value", "pn": "PartNumber", "description": "描述"}
 
     def _edit_row(self) -> None:
         row = self._selected_row()
