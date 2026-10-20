@@ -616,148 +616,87 @@ class CheckPopup(wx.PopupTransientWindow):
 
 
 # --------------------------------------------------------------------------
-# 分割按钮：左边主操作，右边一小格下拉（自绘，视觉上是一个整体按钮）
+# 分割按钮：左边主操作，右边 ▾ 小格下拉
+# 用两个原生 wx.Button 紧贴拼成，字体/圆角/边框/悬停效果与同界面其它按钮一致
 # --------------------------------------------------------------------------
-class SplitButton(wx.Control):
-    """一个按钮两种点击：主体区执行主操作，右侧 ▾ 小格弹选择面板。"""
+class SplitButton(wx.Panel):
+    """一个按钮两种点击：主体按钮执行主操作，右侧 ▾ 小按钮弹选择面板。"""
 
-    ARROW = 24
+    ARROW = 26
     HEIGHT = 30
-    PAD = 28
 
     def __init__(self, parent: wx.Window, label: str, on_click, on_menu):
-        super().__init__(parent, style=wx.BORDER_NONE)
+        super().__init__(parent, style=wx.TAB_TRAVERSAL)
         self._label = label
         self._on_click = on_click
         self._on_menu = on_menu
-        self._hover = ""      # "" / "main" / "arrow"
-        self._pressed = ""
-        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
-        self.SetFont(parent.GetFont())
-        self.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+        self.SetBackgroundColour(parent.GetBackgroundColour())
+
+        self.btn_main = wx.Button(self, label=label)
+        self.btn_arrow = wx.Button(self, label="▼")
+        try:  # 箭头小一点，避免看着笨重
+            self.btn_arrow.SetFont(parent.GetFont().Scaled(0.75))
+        except Exception:  # noqa: BLE001
+            pass
+        for button in (self.btn_main, self.btn_arrow):
+            button.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+            button.SetMinSize((-1, self.HEIGHT))
+        self.btn_arrow.SetMinSize((self.ARROW, self.HEIGHT))
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer.Add(self.btn_main, 1, wx.EXPAND)
+        sizer.Add(self.btn_arrow, 0, wx.EXPAND)
+        self.SetSizer(sizer)
         self._fit_size()
-        self.Bind(wx.EVT_PAINT, self._on_paint)
-        self.Bind(wx.EVT_LEFT_DOWN, self._on_down)
-        self.Bind(wx.EVT_LEFT_UP, self._on_up)
-        self.Bind(wx.EVT_MOTION, self._on_motion)
-        self.Bind(wx.EVT_LEAVE_WINDOW, self._on_leave)
-        self.Bind(wx.EVT_KEY_DOWN, self._on_key)
+
+        self.btn_main.Bind(wx.EVT_BUTTON, lambda e: self._fire(self._on_click))
+        self.btn_arrow.Bind(wx.EVT_BUTTON, lambda e: self._fire(self._on_menu))
+        self.btn_main.Bind(wx.EVT_KEY_DOWN, self._on_main_key)
 
     # -- 外观 -------------------------------------------------------------
     def _fit_size(self) -> None:
-        width, _ = self.GetTextExtent(self._label)
-        size = (width + self.ARROW + self.PAD, self.HEIGHT)
+        best = self.btn_main.GetBestSize()
+        height = max(self.HEIGHT, best.height)
+        size = (best.width + self.ARROW, height)
         self.SetMinSize(size)
         self.SetInitialSize(size)
+        for button in (self.btn_main, self.btn_arrow):
+            button.SetMinSize((-1, height))
+        self.btn_arrow.SetMinSize((self.ARROW, height))
+        self.Layout()
 
     def SetLabel(self, label: str) -> None:  # noqa: N802 (wx 风格)
         if label == self._label:
             return
         self._label = label
+        self.btn_main.SetLabel(label)
         self._fit_size()
         parent = self.GetParent()
         if parent:
             parent.Layout()
-        self.Refresh()
 
     def GetLabel(self) -> str:  # noqa: N802 (wx 风格)
         return self._label
 
     def Enable(self, enable: bool = True) -> bool:  # noqa: N802 (wx 风格)
         ok = super().Enable(enable)
-        self.Refresh()
+        self.btn_main.Enable(enable)
+        self.btn_arrow.Enable(enable)
         return ok
 
-    def _region(self, x: int) -> str:
-        return "arrow" if x >= self.GetSize().width - self.ARROW else "main"
-
-    def _on_paint(self, _event) -> None:
-        dc = wx.AutoBufferedPaintDC(self)
-        self._draw(dc)
-
-    def _draw(self, dc) -> None:
-        """把按钮画到任意 DC（便于截图/离屏渲染）。"""
-        parent = self.GetParent()
-        background = parent.GetBackgroundColour() if parent else wx.Colour(240, 240, 240)
-        dc.SetBackground(wx.Brush(background))
-        dc.Clear()
-
-        width, height = self.GetSize()
-        enabled = self.IsEnabled()
-        base = wx.Colour(246, 248, 251) if enabled else wx.Colour(242, 242, 242)
-        edge = wx.Colour(198, 204, 212)
-        if self._pressed == "main" or (self._hover == "main" and enabled):
-            base = wx.Colour(232, 240, 250)
-            edge = wx.Colour(150, 180, 215)
-        elif self._pressed == "arrow":
-            base = wx.Colour(226, 236, 248)
-        elif self._hover == "arrow" and enabled:
-            base = wx.Colour(238, 244, 251)
-
-        dc.SetPen(wx.Pen(edge, 1))
-        dc.SetBrush(wx.Brush(base))
-        dc.DrawRoundedRectangle(0, 0, width - 1, height - 1, 5)
-
-        # 右侧分隔线
-        split_x = width - self.ARROW
-        dc.SetPen(wx.Pen(wx.Colour(206, 212, 220), 1))
-        dc.DrawLine(split_x, 5, split_x, height - 6)
-
-        # 文字
-        text = self._label
-        dc.SetFont(self.GetFont())
-        dc.SetTextForeground(wx.Colour(40, 44, 50) if enabled else wx.Colour(155, 155, 155))
-        text_w, text_h = dc.GetTextExtent(text)
-        left_w = split_x
-        dc.DrawText(text, max(8, (left_w - text_w) // 2), (height - text_h) // 2)
-
-        # 下拉箭头
-        cx = split_x + self.ARROW // 2
-        cy = height // 2 + 1
-        dc.SetPen(wx.Pen(wx.Colour(96, 104, 114) if enabled else wx.Colour(170, 170, 170), 1))
-        dc.SetBrush(wx.Brush(wx.Colour(96, 104, 114) if enabled else wx.Colour(170, 170, 170)))
-        dc.DrawPolygon([wx.Point(cx - 4, cy - 2), wx.Point(cx + 4, cy - 2), wx.Point(cx, cy + 3)])
+    def SetToolTip(self, *args, **kwargs) -> None:  # noqa: N802 (wx 风格)
+        super().SetToolTip(*args, **kwargs)
+        for button in (self.btn_main, self.btn_arrow):
+            button.SetToolTip(*args, **kwargs)
 
     # -- 交互 -------------------------------------------------------------
-    def _on_motion(self, event) -> None:
-        region = self._region(event.GetX())
-        if region != self._hover:
-            self._hover = region
-            self.Refresh()
-        event.Skip()
+    def _fire(self, handler) -> None:
+        if self.IsEnabled() and handler:
+            handler()
 
-    def _on_leave(self, event) -> None:
-        self._hover = ""
-        self.Refresh()
-        event.Skip()
-
-    def _on_down(self, event) -> None:
-        if not self.IsEnabled():
-            return
-        self._pressed = self._region(event.GetX())
-        self.SetFocus()
-        self.Refresh()
-
-    def _on_up(self, event) -> None:
-        if not self.IsEnabled():
-            return
-        region = self._region(event.GetX())
-        pressed, self._pressed = self._pressed, ""
-        self.Refresh()
-        if not pressed or region != pressed:
-            return
-        if region == "arrow":
-            if self._on_menu:
-                self._on_menu()
-        elif self._on_click:
-            self._on_click()
-
-    def _on_key(self, event) -> None:
+    def _on_main_key(self, event) -> None:
         key = event.GetKeyCode()
-        if key in (wx.WXK_RETURN, wx.WXK_SPACE, wx.WXK_NUMPAD_ENTER):
-            if self.IsEnabled() and self._on_click:
-                self._on_click()
-        elif key == wx.WXK_DOWN and self.IsEnabled() and self._on_menu:
+        if key == wx.WXK_DOWN and self._on_menu:
             self._on_menu()
         else:
             event.Skip()
