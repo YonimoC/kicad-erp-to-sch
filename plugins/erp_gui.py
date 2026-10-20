@@ -793,6 +793,13 @@ class ErpToSchDialog(wx.Dialog):
         wx.CallAfter(self._auto_scan)
 
     # -- UI ---------------------------------------------------------------
+    @staticmethod
+    def _tool_button(panel: wx.Window, label: str) -> wx.Button:
+        """普通按钮：高度与分割按钮保持一致，让工具栏看起来齐平。"""
+        button = wx.Button(panel, label=label)
+        button.SetMinSize((-1, SplitButton.HEIGHT))
+        return button
+
     def _build_ui(self) -> None:
         panel = wx.Panel(self)
         root = wx.BoxSizer(wx.VERTICAL)
@@ -803,34 +810,34 @@ class ErpToSchDialog(wx.Dialog):
         grid.Add(wx.StaticText(panel, label="ERP 物料表"), 0, wx.ALIGN_CENTER_VERTICAL)
         self.txt_erp = wx.TextCtrl(panel, value=self.config.erp_file)
         grid.Add(self.txt_erp, 1, wx.EXPAND)
-        btn_erp = wx.Button(panel, label="浏览…")
-        grid.Add(btn_erp, 0)
+        btn_erp = self._tool_button(panel, "浏览…")
+        grid.Add(btn_erp, 0, wx.ALIGN_CENTER_VERTICAL)
 
         grid.Add(wx.StaticText(panel, label="工程目录"), 0, wx.ALIGN_CENTER_VERTICAL)
         self.txt_project = wx.TextCtrl(panel)
         grid.Add(self.txt_project, 1, wx.EXPAND)
-        btn_proj = wx.Button(panel, label="浏览…")
-        grid.Add(btn_proj, 0)
+        btn_proj = self._tool_button(panel, "浏览…")
+        grid.Add(btn_proj, 0, wx.ALIGN_CENTER_VERTICAL)
         root.Add(grid, 0, wx.EXPAND | wx.ALL, 10)
 
         tools = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_reload = wx.Button(panel, label="重新加载物料表")
-        self.btn_scan = wx.Button(panel, label="扫描")
+        self.btn_reload = self._tool_button(panel, "重新加载物料表")
+        self.btn_scan = self._tool_button(panel, "扫描")
         self.btn_match = SplitButton(panel, "匹配",
                                      on_click=lambda: self._match_all(),
                                      on_menu=self._on_match_menu)
-        self.btn_pick = wx.Button(panel, label="选择候选…")
-        self.btn_search = wx.Button(panel, label="搜索物料…")
-        self.btn_rules = wx.Button(panel, label="参数要求…")
+        self.btn_pick = self._tool_button(panel, "选择候选…")
+        self.btn_search = self._tool_button(panel, "搜索物料…")
+        self.btn_rules = self._tool_button(panel, "参数要求…")
         for button in (self.btn_reload, self.btn_scan, self.btn_match,
                        self.btn_pick, self.btn_search, self.btn_rules):
-            tools.Add(button, 0, wx.RIGHT, 8)
+            tools.Add(button, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8)
         tools.AddStretchSpacer()
         self.btn_apply = SplitButton(panel, "写入原理图",
                                      on_click=lambda: self._apply(),
                                      on_menu=self._on_write_menu)
-        tools.Add(self.btn_apply, 0)
-        root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        tools.Add(self.btn_apply, 0, wx.ALIGN_CENTER_VERTICAL)
+        root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self._column_titles = ["位号", "类别", "Value/型号", "封装", "状态",
