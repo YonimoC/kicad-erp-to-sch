@@ -555,14 +555,14 @@ class CheckPopup(wx.PopupTransientWindow):
             self.checks[key] = check
         sizer.Add(grid, 0, wx.EXPAND | wx.ALL, 14)
 
-        # 底部操作
+        # 底部操作（三个按钮水平均分）
         sizer.Add(wx.StaticLine(body), 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        buttons.Add(self._link_button(body, "全选", lambda: self._set_all(True, on_all)),
-                    0, wx.RIGHT, 16)
-        buttons.Add(self._link_button(body, "全不选", lambda: self._set_all(False, on_all)), 0)
-        buttons.AddStretchSpacer()
-        buttons.Add(self._link_button(body, "关闭", self.Dismiss), 0)
+        buttons.Add(self._small_button(body, "全选", lambda: self._set_all(True, on_all)),
+                    1, wx.EXPAND | wx.RIGHT, 8)
+        buttons.Add(self._small_button(body, "全不选", lambda: self._set_all(False, on_all)),
+                    1, wx.EXPAND | wx.RIGHT, 8)
+        buttons.Add(self._small_button(body, "关闭", self.Dismiss), 1, wx.EXPAND)
         sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 12)
 
         body.SetSizer(sizer)
@@ -570,18 +570,13 @@ class CheckPopup(wx.PopupTransientWindow):
         outer.Add(body, 1, wx.EXPAND | wx.ALL, 1)
         self.SetSizer(outer)
         outer.Fit(self)
-        width = max(230, self.GetSize().width)
+        width = max(260, self.GetSize().width)
         self.SetSize((width, self.GetSize().height))
         self.SetMinSize((width, self.GetSize().height))
 
-    def _link_button(self, parent: wx.Window, text: str, handler) -> wx.Window:
-        """像超链接的扁平小按钮，比原生按钮轻一些。"""
-        button = wx.Button(parent, label=text, style=wx.BORDER_NONE)
-        button.SetBackgroundColour(self.BG)
-        button.SetForegroundColour(self.LINK)
-        font = button.GetFont()
-        font.SetPointSize(max(8, font.GetPointSize() - 1))
-        button.SetFont(font)
+    def _small_button(self, parent: wx.Window, text: str, handler) -> wx.Window:
+        """底部操作按钮（标准按钮，尺寸紧凑）。"""
+        button = wx.Button(parent, label=text, style=wx.BU_EXACTFIT)
         button.SetCursor(wx.Cursor(wx.CURSOR_HAND))
         button.Bind(wx.EVT_BUTTON, lambda e: handler())
         return button
