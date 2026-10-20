@@ -506,48 +506,98 @@ class NewItemDialog(wx.Dialog):
 # 可勾选的下拉面板（勾选后不消失，点外面才关闭）
 # --------------------------------------------------------------------------
 class CheckPopup(wx.PopupTransientWindow):
-    """弹出式多选面板：上面带全选，下面一排复选框。
+    """弹出式多选面板：标题 + 复选框网格 + 底部小按钮。
 
     用 PopupTransientWindow 而不是 Menu，勾选/取消勾选后**不会关闭**，
     可以连续改多项；点面板外面或按 Esc 才消失。
     """
 
+    BG = wx.Colour(252, 252, 252)
+    FRAME = wx.Colour(196, 200, 206)
+    TITLE = wx.Colour(72, 76, 82)
+    TEXT = wx.Colour(48, 52, 58)
+    LINK = wx.Colour(28, 100, 178)
+
     def __init__(self, parent: wx.Window, title: str,
                  items: Sequence[Tuple[str, str, bool]],
-                 on_toggle, on_all=None):
-        super().__init__(parent, wx.BORDER_SIMPLE)
+                 on_toggle, on_all=None, columns: int = 2):
+        # 外层留 1px 灰边（用背景色模拟，比 BORDER_SIMPLE 的 3D 边框干净）
+        super().__init__(parent, wx.BORDER_NONE)
+        self.SetBackgroundColour(self.FRAME)
         self.on_toggle = on_toggle
         self.checks: Dict[str, wx.CheckBox] = {}
 
+        body = wx.Panel(self)
+        body.SetBackgroundColour(self.BG)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label=title), 0, wx.ALL, 8)
 
-        grid = wx.FlexGridSizer(0, 2, 6, 10)
-        for key, label, checked in items:
-            check = wx.CheckBox(self, label=label)
+        # 标题
+        label = wx.StaticText(body, label=title)
+        font = label.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        label.SetFont(font)
+        label.SetForegroundColour(self.TITLE)
+        sizer.Add(label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 14)
+
+        # 分隔线
+        sizer.Add(wx.StaticLine(body), 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 14)
+
+        # 复选框（多列对齐）
+        grid = wx.FlexGridSizer(0, max(1, columns), 9, 26)
+        for key, text, checked in items:
+            check = wx.CheckBox(body, label=text)
             check.SetValue(bool(checked))
+            check.SetForegroundColour(self.TEXT)
+            check.SetCursor(wx.Cursor(wx.CURSOR_HAND))
             check.Bind(wx.EVT_CHECKBOX,
                        lambda event, k=key: self._on_check(k, event.IsChecked()))
-            grid.Add(check)
+            grid.Add(check, 0, wx.ALIGN_CENTER_VERTICAL)
             self.checks[key] = check
-        sizer.Add(grid, 0, wx.LEFT | wx.RIGHT, 10)
+        sizer.Add(grid, 0, wx.EXPAND | wx.ALL, 14)
 
+        # 底部操作
+        sizer.Add(wx.StaticLine(body), 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        btn_all = wx.Button(self, label="全选", style=wx.BU_EXACTFIT)
-        btn_none = wx.Button(self, label="全不选", style=wx.BU_EXACTFIT)
-        btn_close = wx.Button(self, label="关闭", style=wx.BU_EXACTFIT)
-        btn_all.Bind(wx.EVT_BUTTON,
-                     lambda e: self._set_all(True, on_all))
-        btn_none.Bind(wx.EVT_BUTTON,
-                      lambda e: self._set_all(False, on_all))
-        btn_close.Bind(wx.EVT_BUTTON, lambda e: self.Dismiss())
-        buttons.Add(btn_all, 0, wx.RIGHT, 6)
-        buttons.Add(btn_none, 0, wx.RIGHT, 6)
-        buttons.Add(btn_close, 0)
-        sizer.Add(buttons, 0, wx.ALL, 8)
+        buttons.Add(self._link_button(body, "全选", lambda: self._set_all(True, on_all)),
+                    0, wx.RIGHT, 16)
+        buttons.Add(self._link_button(body, "全不选", lambda: self._set_all(False, on_all)), 0)
+        buttons.AddStretchSpacer()
+        buttons.Add(self._link_button(body, "关闭", self.Dismiss), 0)
+        sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 12)
 
-        self.SetSizer(sizer)
-        sizer.Fit(self)
+        body.SetSizer(sizer)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(body, 1, wx.EXPAND | wx.ALL, 1)
+        self.SetSizer(outer)
+        outer.Fit(self)
+        width = max(230, self.GetSize().width)
+        self.SetSize((width, self.GetSize().height))
+        self.SetMinSize((width, self.GetSize().height))
+
+    def _link_button(self, parent: wx.Window, text: str, handler) -> wx.Window:
+        """像超链接的扁平小按钮，比原生按钮轻一些。"""
+        button = wx.Button(parent, label=text, style=wx.BORDER_NONE)
+        button.SetBackgroundColour(self.BG)
+        button.SetForegroundColour(self.LINK)
+        font = button.GetFont()
+        font.SetPointSize(max(8, font.GetPointSize() - 1))
+        button.SetFont(font)
+        button.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+        button.Bind(wx.EVT_BUTTON, lambda e: handler())
+        return button
+
+    def show_below(self, anchor: wx.Window, gap: int = 4) -> None:
+        """贴在按钮下方弹出，并保证不超出屏幕。"""
+        size = self.GetSize()
+        pos = anchor.ClientToScreen(wx.Point(0, anchor.GetSize().height + gap))
+        index = wx.Display.GetFromPoint(pos)
+        if index != wx.NOT_FOUND:
+            area = wx.Display(index).GetClientArea()
+            x = min(max(pos.x, area.x + 4), area.x + area.width - size.width - 4)
+            y = min(max(pos.y, area.y + 4), area.y + area.height - size.height - 4)
+            pos = wx.Point(x, y)
+        self.Position(pos, (0, 0))
+        self.Popup()
 
     def _on_check(self, key: str, checked: bool) -> None:
         try:
@@ -565,6 +615,7 @@ class CheckPopup(wx.PopupTransientWindow):
             except Exception:
                 pass
         self.Layout()
+
 
 
 # --------------------------------------------------------------------------
@@ -910,11 +961,8 @@ class ErpToSchDialog(wx.Dialog):
                 self.match_kinds[k] = value
             self._update_match_label(kinds)
 
-        popup = CheckPopup(self, "选择要参与匹配的类别（勾选不关闭）", items, toggle, on_all)
-        pos = self.btn_match_opts.ClientToScreen(
-            wx.Point(0, self.btn_match_opts.GetSize().height))
-        popup.Position(pos, (0, 0))
-        popup.Popup()
+        popup = CheckPopup(self, "参与匹配的类别", items, toggle, on_all)
+        popup.show_below(self.btn_match_opts)
 
     def _update_match_label(self, kinds: Optional[List[str]] = None) -> None:
         if kinds is None:
@@ -1346,11 +1394,8 @@ class ErpToSchDialog(wx.Dialog):
                 self.write_filters[key] = value
             self._update_apply_label()
 
-        popup = CheckPopup(self, "选择写入范围（勾选不关闭）", items, toggle, on_all)
-        pos = self.btn_apply_opts.ClientToScreen(
-            wx.Point(0, self.btn_apply_opts.GetSize().height))
-        popup.Position(pos, (0, 0))
-        popup.Popup()
+        popup = CheckPopup(self, "写入范围", items, toggle, on_all)
+        popup.show_below(self.btn_apply_opts)
 
     def _update_apply_label(self) -> None:
         enabled = [k for k, v in self.write_filters.items() if v]
