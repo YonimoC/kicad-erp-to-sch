@@ -581,10 +581,12 @@ class CheckPopup(wx.PopupTransientWindow):
         button.Bind(wx.EVT_BUTTON, lambda e: handler())
         return button
 
-    def show_below(self, anchor: wx.Window, gap: int = 4) -> None:
-        """贴在按钮下方弹出，并保证不超出屏幕。"""
+    def show_below(self, anchor: wx.Window, gap: int = 4,
+                   align_right: bool = False) -> None:
+        """贴在控件下方弹出（align_right=True 时右边缘对齐），不超出屏幕。"""
         size = self.GetSize()
-        pos = anchor.ClientToScreen(wx.Point(0, anchor.GetSize().height + gap))
+        offset_x = anchor.GetSize().width - size.width if align_right else 0
+        pos = anchor.ClientToScreen(wx.Point(offset_x, anchor.GetSize().height + gap))
         index = wx.Display.GetFromPoint(pos)
         if index != wx.NOT_FOUND:
             area = wx.Display(index).GetClientArea()
@@ -611,6 +613,154 @@ class CheckPopup(wx.PopupTransientWindow):
                 pass
         self.Layout()
 
+
+
+# --------------------------------------------------------------------------
+# 分割按钮：左边主操作，右边一小格下拉（自绘，视觉上是一个整体按钮）
+# --------------------------------------------------------------------------
+class SplitButton(wx.Control):
+    """一个按钮两种点击：主体区执行主操作，右侧 ▾ 小格弹选择面板。"""
+
+    ARROW = 24
+    HEIGHT = 30
+    PAD = 28
+
+    def __init__(self, parent: wx.Window, label: str, on_click, on_menu):
+        super().__init__(parent, style=wx.BORDER_NONE)
+        self._label = label
+        self._on_click = on_click
+        self._on_menu = on_menu
+        self._hover = ""      # "" / "main" / "arrow"
+        self._pressed = ""
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.SetFont(parent.GetFont())
+        self.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+        self._fit_size()
+        self.Bind(wx.EVT_PAINT, self._on_paint)
+        self.Bind(wx.EVT_LEFT_DOWN, self._on_down)
+        self.Bind(wx.EVT_LEFT_UP, self._on_up)
+        self.Bind(wx.EVT_MOTION, self._on_motion)
+        self.Bind(wx.EVT_LEAVE_WINDOW, self._on_leave)
+        self.Bind(wx.EVT_KEY_DOWN, self._on_key)
+
+    # -- 外观 -------------------------------------------------------------
+    def _fit_size(self) -> None:
+        width, _ = self.GetTextExtent(self._label)
+        size = (width + self.ARROW + self.PAD, self.HEIGHT)
+        self.SetMinSize(size)
+        self.SetInitialSize(size)
+
+    def SetLabel(self, label: str) -> None:  # noqa: N802 (wx 风格)
+        if label == self._label:
+            return
+        self._label = label
+        self._fit_size()
+        parent = self.GetParent()
+        if parent:
+            parent.Layout()
+        self.Refresh()
+
+    def GetLabel(self) -> str:  # noqa: N802 (wx 风格)
+        return self._label
+
+    def Enable(self, enable: bool = True) -> bool:  # noqa: N802 (wx 风格)
+        ok = super().Enable(enable)
+        self.Refresh()
+        return ok
+
+    def _region(self, x: int) -> str:
+        return "arrow" if x >= self.GetSize().width - self.ARROW else "main"
+
+    def _on_paint(self, _event) -> None:
+        dc = wx.AutoBufferedPaintDC(self)
+        self._draw(dc)
+
+    def _draw(self, dc) -> None:
+        """把按钮画到任意 DC（便于截图/离屏渲染）。"""
+        parent = self.GetParent()
+        background = parent.GetBackgroundColour() if parent else wx.Colour(240, 240, 240)
+        dc.SetBackground(wx.Brush(background))
+        dc.Clear()
+
+        width, height = self.GetSize()
+        enabled = self.IsEnabled()
+        base = wx.Colour(246, 248, 251) if enabled else wx.Colour(242, 242, 242)
+        edge = wx.Colour(198, 204, 212)
+        if self._pressed == "main" or (self._hover == "main" and enabled):
+            base = wx.Colour(232, 240, 250)
+            edge = wx.Colour(150, 180, 215)
+        elif self._pressed == "arrow":
+            base = wx.Colour(226, 236, 248)
+        elif self._hover == "arrow" and enabled:
+            base = wx.Colour(238, 244, 251)
+
+        dc.SetPen(wx.Pen(edge, 1))
+        dc.SetBrush(wx.Brush(base))
+        dc.DrawRoundedRectangle(0, 0, width - 1, height - 1, 5)
+
+        # 右侧分隔线
+        split_x = width - self.ARROW
+        dc.SetPen(wx.Pen(wx.Colour(206, 212, 220), 1))
+        dc.DrawLine(split_x, 5, split_x, height - 6)
+
+        # 文字
+        text = self._label
+        dc.SetFont(self.GetFont())
+        dc.SetTextForeground(wx.Colour(40, 44, 50) if enabled else wx.Colour(155, 155, 155))
+        text_w, text_h = dc.GetTextExtent(text)
+        left_w = split_x
+        dc.DrawText(text, max(8, (left_w - text_w) // 2), (height - text_h) // 2)
+
+        # 下拉箭头
+        cx = split_x + self.ARROW // 2
+        cy = height // 2 + 1
+        dc.SetPen(wx.Pen(wx.Colour(96, 104, 114) if enabled else wx.Colour(170, 170, 170), 1))
+        dc.SetBrush(wx.Brush(wx.Colour(96, 104, 114) if enabled else wx.Colour(170, 170, 170)))
+        dc.DrawPolygon([wx.Point(cx - 4, cy - 2), wx.Point(cx + 4, cy - 2), wx.Point(cx, cy + 3)])
+
+    # -- 交互 -------------------------------------------------------------
+    def _on_motion(self, event) -> None:
+        region = self._region(event.GetX())
+        if region != self._hover:
+            self._hover = region
+            self.Refresh()
+        event.Skip()
+
+    def _on_leave(self, event) -> None:
+        self._hover = ""
+        self.Refresh()
+        event.Skip()
+
+    def _on_down(self, event) -> None:
+        if not self.IsEnabled():
+            return
+        self._pressed = self._region(event.GetX())
+        self.SetFocus()
+        self.Refresh()
+
+    def _on_up(self, event) -> None:
+        if not self.IsEnabled():
+            return
+        region = self._region(event.GetX())
+        pressed, self._pressed = self._pressed, ""
+        self.Refresh()
+        if not pressed or region != pressed:
+            return
+        if region == "arrow":
+            if self._on_menu:
+                self._on_menu()
+        elif self._on_click:
+            self._on_click()
+
+    def _on_key(self, event) -> None:
+        key = event.GetKeyCode()
+        if key in (wx.WXK_RETURN, wx.WXK_SPACE, wx.WXK_NUMPAD_ENTER):
+            if self.IsEnabled() and self._on_click:
+                self._on_click()
+        elif key == wx.WXK_DOWN and self.IsEnabled() and self._on_menu:
+            self._on_menu()
+        else:
+            event.Skip()
 
 
 # --------------------------------------------------------------------------
@@ -666,19 +816,20 @@ class ErpToSchDialog(wx.Dialog):
         tools = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_reload = wx.Button(panel, label="重新加载物料表")
         self.btn_scan = wx.Button(panel, label="扫描")
-        self.btn_match_opts = wx.Button(panel, label="匹配类别 ▾", style=wx.BU_EXACTFIT)
-        self.btn_match = wx.Button(panel, label="匹配")
+        self.btn_match = SplitButton(panel, "匹配",
+                                     on_click=lambda: self._match_all(),
+                                     on_menu=self._on_match_menu)
         self.btn_pick = wx.Button(panel, label="选择候选…")
         self.btn_search = wx.Button(panel, label="搜索物料…")
         self.btn_rules = wx.Button(panel, label="参数要求…")
-        for button in (self.btn_reload, self.btn_scan, self.btn_match_opts, self.btn_match,
+        for button in (self.btn_reload, self.btn_scan, self.btn_match,
                        self.btn_pick, self.btn_search, self.btn_rules):
             tools.Add(button, 0, wx.RIGHT, 8)
         tools.AddStretchSpacer()
-        self.btn_apply = wx.Button(panel, label="写入原理图")
-        self.btn_apply_opts = wx.Button(panel, label="写入范围 ▾", style=wx.BU_EXACTFIT)
-        tools.Add(self.btn_apply, 0, wx.RIGHT, 4)
-        tools.Add(self.btn_apply_opts, 0)
+        self.btn_apply = SplitButton(panel, "写入原理图",
+                                     on_click=lambda: self._apply(),
+                                     on_menu=self._on_write_menu)
+        tools.Add(self.btn_apply, 0)
         root.Add(tools, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         self.list = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
@@ -703,13 +854,9 @@ class ErpToSchDialog(wx.Dialog):
         btn_proj.Bind(wx.EVT_BUTTON, lambda e: self._browse_project())
         self.btn_reload.Bind(wx.EVT_BUTTON, lambda e: self._load_data(verbose=True, force=True))
         self.btn_scan.Bind(wx.EVT_BUTTON, lambda e: self._scan())
-        self.btn_match.Bind(wx.EVT_BUTTON, lambda e: self._match_all())
-        self.btn_match_opts.Bind(wx.EVT_BUTTON, lambda e: self._on_match_menu())
         self.btn_pick.Bind(wx.EVT_BUTTON, lambda e: self._pick_candidate())
         self.btn_search.Bind(wx.EVT_BUTTON, lambda e: self._search_material())
         self.btn_rules.Bind(wx.EVT_BUTTON, lambda e: self._show_rules())
-        self.btn_apply.Bind(wx.EVT_BUTTON, lambda e: self._apply())
-        self.btn_apply_opts.Bind(wx.EVT_BUTTON, lambda e: self._on_write_menu())
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._activate_row())
         self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_column_click)
         self.list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._on_right_click)
@@ -957,7 +1104,7 @@ class ErpToSchDialog(wx.Dialog):
             self._update_match_label(kinds)
 
         popup = CheckPopup(self, "参与匹配的类别", items, toggle, on_all)
-        popup.show_below(self.btn_match_opts)
+        popup.show_below(self.btn_match, align_right=True)
 
     def _update_match_label(self, kinds: Optional[List[str]] = None) -> None:
         if kinds is None:
@@ -971,8 +1118,9 @@ class ErpToSchDialog(wx.Dialog):
             self.btn_match.SetLabel("匹配")
         else:
             self.btn_match.SetLabel(f"匹配（{len(enabled)}/{len(kinds)} 类）")
-        self.btn_match_opts.SetToolTip(
-            "选择要匹配的类别：" + ("、".join(self._kind_label(k) for k in enabled) or "无"))
+        self.btn_match.SetToolTip(
+            "左侧单击：开始匹配；右侧 ▾：选择要匹配的类别"
+            "（当前：" + ("、".join(self._kind_label(k) for k in enabled) or "无") + "）")
 
     def _match_all(self, interactive: bool = True) -> None:
         """只匹配还没有 PartNumber 的行；已有数据的一律不动。"""
@@ -1390,13 +1538,15 @@ class ErpToSchDialog(wx.Dialog):
             self._update_apply_label()
 
         popup = CheckPopup(self, "写入范围", items, toggle, on_all)
-        popup.show_below(self.btn_apply_opts)
+        popup.show_below(self.btn_apply, align_right=True)
 
     def _update_apply_label(self) -> None:
         enabled = [k for k, v in self.write_filters.items() if v]
         self.btn_apply.SetLabel("写入原理图" if len(enabled) == 3 else f"写入原理图（{'/'.join(enabled) or '无'}）")
         self.btn_apply.Enable(bool(enabled))
-        self.btn_apply_opts.SetToolTip("选择写入范围：" + ("、".join(enabled) or "未选择"))
+        self.btn_apply.SetToolTip(
+            "左侧单击：写入原理图；右侧 ▾：选择写入范围"
+            "（当前：" + ("、".join(enabled) or "未选择") + "）")
 
     def _write_enabled(self, row: MatchRow) -> bool:
         if row.status == "已匹配":
