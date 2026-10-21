@@ -74,15 +74,15 @@ _DIMENSION_RE = re.compile(
     r"(?:\s*[*xX×]\s*(\d+(?:\.\d+)?))?\s*(?:mm|MM|毫米)"
 )
 
-#: LED 颜色（中文 / 英文写法 → 规范色名）
+#: LED 颜色（中文 / 英文写法 → 规范色名）；含裸色字，兼容“红绿双色”这种写法
 _LED_COLOR_TABLE = (
-    ("红", ("红光", "红色", "红发", "RED")),
-    ("绿", ("翠绿", "绿光", "绿色", "黄绿", "绿发", "GREEN")),
-    ("蓝", ("蓝光", "蓝色", "蓝发", "BLUE")),
-    ("白", ("白光", "白色", "白发", "WHITE")),
-    ("黄", ("黄光", "黄色", "黄发", "AMBER", "YELLOW")),
-    ("橙", ("橙光", "橙色", "橙发", "ORANGE")),
-    ("紫", ("紫光", "紫色", "PURPLE", "VIOLET")),
+    ("红", ("红", "Red")),
+    ("绿", ("绿", "Green")),
+    ("蓝", ("蓝", "Blue")),
+    ("白", ("白", "White")),
+    ("黄", ("黄", "Yellow", "Amber")),
+    ("橙", ("橙", "Orange")),
+    ("紫", ("紫", "Purple", "Violet")),
 )
 
 _UNIT_SCALE = {
@@ -208,15 +208,25 @@ def extract_inductor_size(text: str) -> str:
 
 def led_color(text: str) -> str:
     """识别 LED 颜色（红/绿/蓝/白/黄/橙/紫），识别不出返回空串。"""
+    colours = led_colors(text)
+    return next(iter(colours), "")
+
+
+def led_colors(text: str) -> frozenset:
+    """识别 LED 涉及的所有颜色（双色 LED 会返回两个）。"""
     upper = (text or "").upper()
+    found = set()
     for colour, words in _LED_COLOR_TABLE:
         for word in words:
             if word.isascii():
-                if re.search(r"(?<![A-Z])" + re.escape(word) + r"(?![A-Z])", upper):
-                    return colour
+                if re.search(r"(?<![A-Z])" + re.escape(word.upper()) + r"(?![A-Z])", upper):
+                    found.add(colour)
+                    break
             elif word in (text or ""):
-                return colour
-    return ""
+                found.add(colour)
+                break
+    # “翠绿” 同时含“绿”，已按表顺序处理
+    return frozenset(found)
 
 
 def normalize_package(raw: str) -> str:
@@ -949,7 +959,11 @@ def _dielectric_rank(dielectric: str, kind: str, config: Config) -> int:
 
 
 def _inductor_size_conflict(a: str, b: str) -> bool:
-    """电感封装是否矛盾（任一侧认不出就不算矛盾）。"""
+    """电感封装是否矛盾。
+
+    两侧都认得出尺寸时：尺寸集合相交则视为一致；
+    认不出尺寸但代码不同（如 0603 芯片电感 vs 4030 功率电感）也算矛盾。
+    """
     if not a or not b:
         return False
     if a == b:
@@ -957,8 +971,15 @@ def _inductor_size_conflict(a: str, b: str) -> bool:
     dims_a = inductor_dimensions(a)
     dims_b = inductor_dimensions(b)
     if not dims_a or not dims_b:
-        return False
+        return True
     return not (dims_a & dims_b)
+
+
+def _inductor_size_rank(comp_size: str, material_size: str) -> int:
+    """0 = 尺寸对得上，1 = 物料没写尺寸，2 = 尺寸不符。"""
+    if not material_size:
+        return 1
+    return 2 if _inductor_size_conflict(comp_size, material_size) else 0
 
 
 def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
@@ -999,18 +1020,17 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
             return False
         return True
 
-    # 发光二极管：按封装尺寸 + 颜色匹配
+    # 发光二极管：按封装尺寸 + 颜色匹配（两侧都要认得出尺寸，避免错配插件灯）
     if comp.kind == "LED":
-        if not comp.size:
+        if not comp.size or not parsed.size:
             return False
-        if parsed.size and parsed.size != comp.size:
-            led0 = extract_led_size(comp.size)
-            led1 = extract_led_size(parsed.size)
-            if not (led0 and led1 and led0 == led1):
-                return False
-        colour_comp = led_color(comp.value)
-        colour_mat = led_color(f"{material.name} {material.spec}")
-        if colour_comp and colour_mat and colour_comp != colour_mat:
+        led_comp = extract_led_size(comp.size)
+        led_mat = extract_led_size(parsed.size)
+        if not (led_comp and led_mat and led_comp == led_mat):
+            return False
+        colour_comp = led_colors(comp.value)
+        colour_mat = led_colors(f"{material.name} {material.spec}")
+        if colour_comp and colour_mat and not (colour_comp & colour_mat):
             return False
         return True
 
@@ -1054,6 +1074,7 @@ def build_candidates(comp: Component, materials: Iterable[Material],
         if comp.kind == "L":
             return (
                 candidate.brand_rank,
+                _inductor_size_rank(comp.size, candidate.parsed.size),
                 _tolerance_rank(candidate.parsed.tolerance, comp.tolerance, comp.kind, config),
                 0 if candidate.parsed.current else 1,
                 -(candidate.parsed.current or 0.0),
@@ -1076,9 +1097,21 @@ def build_candidates(comp: Component, materials: Iterable[Material],
                 candidate.pn,
             )
         if comp.kind == "LED":
+            colour_comp = led_colors(comp.value)
+            colour_mat = led_colors(f"{candidate.material.name} {candidate.material.spec}")
+            if colour_comp and colour_mat:
+                if colour_comp == colour_mat:
+                    colour_rank = 0
+                elif colour_comp <= colour_mat:
+                    colour_rank = 1
+                else:
+                    colour_rank = 3
+            else:
+                colour_rank = 2
             return (
                 candidate.brand_rank,
                 0 if candidate.parsed.size == comp.size else 1,
+                colour_rank,
                 stock,
                 candidate.pn,
             )
