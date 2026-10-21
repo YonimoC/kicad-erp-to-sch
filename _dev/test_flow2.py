@@ -59,8 +59,10 @@ def main() -> int:
     for row in dlg.rows:
         states[row.status] = states.get(row.status, 0) + 1
     print("重新扫描状态:", states)
-    assert states.get("已是最新", 0) + states.get("未自动匹配", 0) == len(dlg.rows), states
-    assert states.get("未自动匹配", 0) == 1, states  # 只有 LED
+    # 已有数据会被核对：除了已是最新，还可能被标记为 非最优 / 料号有误等
+    known = ("已是最新", "已匹配", "非最优", "料号有误", "描述不符", "料号不匹配",
+             "未自动匹配")
+    assert sum(states.get(s, 0) for s in known) == len(dlg.rows), states
     assert len(dlg.rows) == 8, len(dlg.rows)
 
     src = Path(r"D:\KiCad\10.0\share\kicad\demos\complex_hierarchy")

@@ -4,7 +4,9 @@
 ----------
 * R   贴片电阻      ：Value + 封装尺寸（10K + 0603）
 * C   贴片电容      ：Value + 封装尺寸（100nF + 0603）
-* D   贴片二极管    ：型号（SS14 …）—— **发光二极管(LED) 不参与匹配**
+* L   贴片电感      ：Value + 封装（0603 / 0630 / 0850 / 5.0*5.0*4.0mm）
+* LED 发光二极管    ：封装尺寸（0603 / 2835 / 5050）+ 颜色
+* D   贴片二极管    ：型号（SS14 …）
 * IC  贴片集成电路  ：型号（LM358 / BS84B08A-3 …）
 * Q   贴片三极管    ：型号（BC847C …）
 * MOS 贴片 MOS 管   ：型号（AO3400A ……）
@@ -55,6 +57,34 @@ _FREQ_SHORT_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*([kKmMgG])$")
 #: 常见晶振封装尺寸（4 位代码）
 CRYSTAL_SIZE_RE = re.compile(r"(?<!\d)(1612|2016|2520|3225|5032|7050|6035|8038)(?!\d)")
 
+#: 贴片 LED 常见封装尺寸（含 2835 / 5050 等功率 LED）
+LED_SIZE_RE = re.compile(
+    r"(?<!\d)(0201|0402|0603|0805|1206|1210|1615|2016|2835|3014|3020|3030|"
+    r"3528|3535|4014|5050|5630|5730|7030)(?!\d)"
+)
+
+#: 芯片类尺寸（电阻/电容/芯片电感），做电感封装识别时要排除
+_CHIP_SIZE_SET = {"0201", "0402", "0603", "0805", "1206", "1210", "1812", "2010", "2512"}
+_CRYSTAL_SIZE_SET = {"1612", "2016", "2520", "3225", "5032", "7050", "6035", "8038"}
+#: 任意 4 位数字（电感封装代码 / 尺寸代码）
+_SIZE_TOKEN_RE = re.compile(r"(?<!\d)(\d{4})(?!\d)")
+#: 外形尺寸写法 6.0*6.0*3.0mm / 5.0x5.0x4.0mm
+_DIMENSION_RE = re.compile(
+    r"(?<!\d)(\d+(?:\.\d+)?)\s*[*xX×]\s*(\d+(?:\.\d+)?)"
+    r"(?:\s*[*xX×]\s*(\d+(?:\.\d+)?))?\s*(?:mm|MM|毫米)"
+)
+
+#: LED 颜色（中文 / 英文写法 → 规范色名）
+_LED_COLOR_TABLE = (
+    ("红", ("红光", "红色", "红发", "RED")),
+    ("绿", ("翠绿", "绿光", "绿色", "黄绿", "绿发", "GREEN")),
+    ("蓝", ("蓝光", "蓝色", "蓝发", "BLUE")),
+    ("白", ("白光", "白色", "白发", "WHITE")),
+    ("黄", ("黄光", "黄色", "黄发", "AMBER", "YELLOW")),
+    ("橙", ("橙光", "橙色", "橙发", "ORANGE")),
+    ("紫", ("紫光", "紫色", "PURPLE", "VIOLET")),
+)
+
 _UNIT_SCALE = {
     "p": 1e-12, "P": 1e-12,
     "n": 1e-9, "N": 1e-9,
@@ -77,6 +107,7 @@ KIND_LABELS = {
     "X": "晶振",
     "XO": "有源晶振",
     "D": "二极管",
+    "LED": "发光二极管",
     "IC": "芯片",
     "Q": "三极管",
     "MOS": "MOS管",
@@ -110,6 +141,82 @@ def is_tht_footprint(footprint: str) -> bool:
 def extract_size(text: str) -> str:
     m = SIZE_RE.search(text or "")
     return m.group(1) if m else ""
+
+
+def extract_led_size(text: str) -> str:
+    """LED 封装尺寸：支持 0603 这类贴片尺寸和 2835/5050 这类功率 LED 封装。"""
+    m = LED_SIZE_RE.search(text or "")
+    if m:
+        return m.group(1)
+    return extract_size(text)
+
+
+def _decode_inductor_code(token: str) -> set:
+    """把 4 位电感封装代码解成 (宽 mm, 高 mm) 的候选集合。
+
+    三种常见写法都支持：`4030` = 4.0×3.0mm、`0630` = 6.0×3.0mm、`1050` = 10×5.0mm。
+    """
+    dims = set()
+    token = (token or "").strip()
+    if len(token) != 4 or not token.isdigit():
+        return dims
+    head, tail = token[:2], token[2:]
+    dims.add((round(int(head) / 10.0, 1), round(int(tail) / 10.0, 1)))
+    if head.startswith("0") or int(head) >= 10:
+        dims.add((round(float(int(head)), 1), round(int(tail) / 10.0, 1)))
+    return dims
+
+
+def inductor_dimensions(text: str) -> set:
+    """功率电感外形尺寸集合（(宽, 高) mm），识别不出返回空集合。"""
+    text = text or ""
+    m = _DIMENSION_RE.search(text)
+    if m:
+        width = float(m.group(1))
+        height = float(m.group(3) or m.group(2))
+        return {(round(width, 1), round(height, 1))}
+    dims = set()
+    for token in _SIZE_TOKEN_RE.findall(text):
+        if token in _CHIP_SIZE_SET or token in _CRYSTAL_SIZE_SET:
+            continue
+        dims |= _decode_inductor_code(token)
+    return dims
+
+
+def extract_inductor_size(text: str) -> str:
+    """功率电感封装代码：0630 / 0850 / 1050，或从 6.0*6.0*3.0mm 换算。
+
+    封装名里同时有芯片尺寸（如 `L_0603_1608Metric`）时，优先用芯片尺寸 0603。
+    """
+    text = text or ""
+    chip = extract_size(text)
+    if chip:
+        return chip
+    for token in _SIZE_TOKEN_RE.findall(text):
+        if token in _CHIP_SIZE_SET or token in _CRYSTAL_SIZE_SET:
+            continue
+        if _decode_inductor_code(token):
+            return token
+    m = _DIMENSION_RE.search(text)
+    if m:
+        width = float(m.group(1))
+        height = float(m.group(3) or m.group(2))
+        if width >= 1 and height >= 0.5:
+            return f"{int(round(width * 10)):02d}{int(round(height * 10)):02d}"
+    return ""
+
+
+def led_color(text: str) -> str:
+    """识别 LED 颜色（红/绿/蓝/白/黄/橙/紫），识别不出返回空串。"""
+    upper = (text or "").upper()
+    for colour, words in _LED_COLOR_TABLE:
+        for word in words:
+            if word.isascii():
+                if re.search(r"(?<![A-Z])" + re.escape(word) + r"(?![A-Z])", upper):
+                    return colour
+            elif word in (text or ""):
+                return colour
+    return ""
 
 
 def normalize_package(raw: str) -> str:
@@ -410,11 +517,14 @@ def search_keyword(comp: "Component") -> str:
     """
     kind = getattr(comp, "kind", "") or ""
     label = KIND_LABELS.get(kind, "")
-    if kind in ("R", "C", "L", "X", "XO"):
+    if kind in ("R", "C", "L", "X", "XO", "LED"):
         package = getattr(comp, "size", "") or getattr(comp, "package", "") or ""
     else:
         package = getattr(comp, "package", "") or getattr(comp, "size", "") or ""
     value = (getattr(comp, "model", "") or getattr(comp, "value", "") or "").strip()
+    if kind == "LED":
+        # ERP 里 LED 描述用中文色名（红光/绿光…）
+        value = led_color(getattr(comp, "value", "") or "")
     if kind == "R":
         number = getattr(comp, "value_num", None)
         if number is None:
@@ -501,8 +611,8 @@ def _classify_material(material: Material, mount: str = "") -> str:
         return "MOS"
     if "三极管" in text:
         return "Q"
-    if "发光" in text:
-        return ""          # 发光二极管不参与匹配
+    if "发光" in text or "LED" in text.upper():
+        return "LED"
     if "二极管" in text:
         return "D"
     if "有源" in text or "oscillator" in text.lower():
@@ -557,6 +667,12 @@ def parse_material(material: Material, config: Config) -> ParsedMaterial:
     parsed.size = extract_size(text) or extract_crystal_size(text)
     parsed.package = extract_package(material.spec) or extract_package(material.name)
     parsed.tolerance = parse_tolerance(material.spec)
+
+    if parsed.kind == "L":
+        # 功率电感常见封装 0630 / 0850 / 5.0*5.0*4.0mm
+        parsed.size = extract_inductor_size(text) or parsed.size
+    elif parsed.kind == "LED":
+        parsed.size = extract_led_size(text) or parsed.size
 
     if parsed.kind == "R":
         value = parse_resistance(material.spec)
@@ -702,14 +818,14 @@ def analyze_component(comp: Component, config: Config) -> Component:
         return comp
 
     kind = _kind_from_lib(lib_low)
-    if kind in ("OTHER", "LED"):
-        return comp  # 连接器/开关等不自动匹配；发光二极管不匹配
+    if kind == "OTHER":
+        return comp  # 连接器/开关等不自动匹配
 
     if not kind:
         # 库名看不出类别时，退回按位号前缀判断
         if prefix.startswith("LED"):
-            return comp
-        if prefix.startswith("R"):
+            kind = "LED"
+        elif prefix.startswith("R"):
             if any(k in text for k in ("potentiometer", "thermistor", "network", "r_pack")):
                 return comp
             kind = "R"
@@ -719,8 +835,9 @@ def analyze_component(comp: Component, config: Config) -> Component:
             kind = "L"
         elif prefix.startswith("D"):
             if _looks_like_led(lib, comp.value):
-                return comp
-            kind = "D"
+                kind = "LED"
+            else:
+                kind = "D"
         elif prefix.startswith(("Q", "T")):
             kind = "MOS" if any(k in lib_low for k in ("mos", "fet", "nmos", "pmos")) else "Q"
         elif prefix.startswith("U") or prefix.startswith("IC"):
@@ -731,6 +848,16 @@ def analyze_component(comp: Component, config: Config) -> Component:
     comp.kind = kind
     if kind in ("X", "XO"):
         comp.size = extract_crystal_size(comp.footprint) or comp.size
+    elif kind == "L":
+        # 功率电感封装：L_0630 / Inductor_SMD:L_0850，或 6.0*6.0*3.0mm
+        comp.size = (extract_inductor_size(comp.footprint)
+                     or extract_inductor_size(comp.value) or comp.size)
+    elif kind == "LED":
+        comp.size = (extract_led_size(comp.footprint)
+                     or extract_led_size(comp.value) or comp.size)
+        # LED 的 Value 通常是颜色（Red / 红光）或就是 LED，不算型号
+        value = (comp.value or "").strip()
+        comp.model = "" if (led_color(value) or value.upper() in ("LED", "")) else value
 
     if kind == "R":
         comp.value_num = parse_resistance(comp.value)
@@ -741,6 +868,8 @@ def analyze_component(comp: Component, config: Config) -> Component:
         comp.current = parse_current(comp.value)
     elif kind in ("X", "XO"):
         comp.value_num = parse_frequency(comp.value)
+    elif kind == "LED":
+        pass  # 型号已经在上面按 LED 规则处理（颜色/纯 LED 不算型号）
     else:
         comp.model = (comp.value or "").strip()
     return comp
@@ -819,6 +948,19 @@ def _dielectric_rank(dielectric: str, kind: str, config: Config) -> int:
     return order.index(d) if d in order else len(order)
 
 
+def _inductor_size_conflict(a: str, b: str) -> bool:
+    """电感封装是否矛盾（任一侧认不出就不算矛盾）。"""
+    if not a or not b:
+        return False
+    if a == b:
+        return False
+    dims_a = inductor_dimensions(a)
+    dims_b = inductor_dimensions(b)
+    if not dims_a or not dims_b:
+        return False
+    return not (dims_a & dims_b)
+
+
 def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
     if not parsed.kind or parsed.kind != comp.kind:
         return False
@@ -846,7 +988,7 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
         return _num_equal(parsed.value, comp.value_num)
 
     if comp.kind == "L":
-        if comp.size and parsed.size and comp.size != parsed.size:
+        if _inductor_size_conflict(comp.size, parsed.size):
             return False
         if comp.value_num is None or parsed.value is None:
             return False
@@ -854,6 +996,21 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
             return False
         # 物料额定电流低于元件需求时排除（任一侧未知则不比较）
         if comp.current and parsed.current and parsed.current + 1e-9 < comp.current:
+            return False
+        return True
+
+    # 发光二极管：按封装尺寸 + 颜色匹配
+    if comp.kind == "LED":
+        if not comp.size:
+            return False
+        if parsed.size and parsed.size != comp.size:
+            led0 = extract_led_size(comp.size)
+            led1 = extract_led_size(parsed.size)
+            if not (led0 and led1 and led0 == led1):
+                return False
+        colour_comp = led_color(comp.value)
+        colour_mat = led_color(f"{material.name} {material.spec}")
+        if colour_comp and colour_mat and colour_comp != colour_mat:
             return False
         return True
 
@@ -865,6 +1022,11 @@ def _material_matches(comp: Component, parsed: ParsedMaterial) -> bool:
         return False
     haystack = normalize_model(material.spec) + "|" + normalize_model(material.name)
     return needle in haystack
+
+
+def material_fits(comp: Component, parsed: ParsedMaterial) -> bool:
+    """公开接口：这份物料是否适配该元件（与自动匹配同一套规则）。"""
+    return _material_matches(comp, parsed)
 
 
 def build_candidates(comp: Component, materials: Iterable[Material],
@@ -910,6 +1072,13 @@ def build_candidates(comp: Component, materials: Iterable[Material],
                 candidate.brand_rank,
                 _tolerance_rank(candidate.parsed.tolerance, comp.tolerance, comp.kind, config),
                 _dielectric_rank(candidate.parsed.dielectric, comp.kind, config),
+                stock,
+                candidate.pn,
+            )
+        if comp.kind == "LED":
+            return (
+                candidate.brand_rank,
+                0 if candidate.parsed.size == comp.size else 1,
                 stock,
                 candidate.pn,
             )
@@ -974,6 +1143,7 @@ THT_KIND_RULES = {
     "X": "插件晶振",
     "XO": "插件晶振",
     "D": "插件二极管",
+    "LED": "插件发光二极管",
     "IC": "插件集成电路",
     "Q": "插件三极管",
     "MOS": "插件场效应管",
@@ -987,6 +1157,7 @@ SMT_KIND_RULES = {
     "X": "贴片晶振",
     "XO": "贴片晶振",
     "D": "贴片二极管",
+    "LED": "贴片发光二极管",
     "IC": "IC类",
     "Q": "贴片三极管",
     "MOS": "贴片场效应管",

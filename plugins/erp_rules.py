@@ -68,6 +68,7 @@ _KIND_RULE = {
     "X": "贴片晶振",
     "XO": "贴片晶振",
     "D": "贴片二极管",
+    "LED": "贴片发光二极管",
     "IC": "IC类",
     "Q": "贴片三极管",
     "MOS": "贴片场效应管",
@@ -159,6 +160,7 @@ def suggest_rule_name(comp) -> str:
             "L": "插件电感",
             "X": "插件晶振",
             "D": "插件发光二极管" if ("led" in text or "发光" in text) else "插件二极管",
+            "LED": "插件发光二极管",
             "IC": "插件集成电路",
             "Q": "插件三极管",
             "MOS": "插件场效应管",
@@ -247,7 +249,7 @@ def _field_value(field: str, index: int, rule_name: str, comp, config,
     size = getattr(comp, "size", "") or ""
     package = getattr(comp, "package", "") or ""
     model = getattr(comp, "model", "") or ""
-    if not model and kind not in ("R", "C", "L", "X"):
+    if not model and kind not in ("R", "C", "L", "X", "LED"):
         model = getattr(comp, "value", "") or ""
     brand = str(config.get("new_brand") or "FH")
 
@@ -290,6 +292,22 @@ def _field_value(field: str, index: int, rule_name: str, comp, config,
     if "电流" in key:
         current = getattr(comp, "current", None)
         return f"{current:g}A" if current else ""
+    if "颜色" in key:
+        try:
+            from erp_match import led_color
+
+            colour = led_color(getattr(comp, "value", "") or "")
+        except Exception:
+            colour = ""
+        return f"{colour}光" if colour else ""
+    if "电压" in key and kind == "LED":
+        try:
+            from erp_match import parse_voltage
+
+            voltage = parse_voltage(getattr(comp, "value", "") or "")
+        except Exception:
+            voltage = None
+        return f"{voltage:g}V" if voltage else ""
     if "频率" in key:
         try:
             from erp_match import format_frequency, parse_frequency

@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 PLUGIN_IDENTIFIER = "com.github.YonimoC.kicad-erp-to-sch"
 #: 插件版本（发版时与 metadata.json 同步修改）
-PLUGIN_VERSION = "1.0.10"
+PLUGIN_VERSION = "1.0.11"
 
 #: 仓库内默认数据文件位置（打包后可在设置里改成 ERP 导出目录）
 DEFAULT_ERP_FILE = r"D:\_LWH\KiCad Lib\Addons\ERP-To-SCH\原材料基础数据 copy.xls"

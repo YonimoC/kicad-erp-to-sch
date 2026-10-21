@@ -6,6 +6,7 @@ import os
 import re
 import time
 import traceback
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -30,6 +31,7 @@ from erp_match import (
     canonical_new_rule,
     is_electronic_pn,
     is_tht_footprint,
+    material_fits,
     parse_material,
     search_keyword,
     search_normalize,
@@ -273,17 +275,11 @@ class CandidateDialog(wx.Dialog):
             ("物料编码", 130), ("描述", 500), ("品牌", 90), ("库存", 80), ("优先级", 80),
         ]):
             self.list.InsertColumn(idx, title, width=width)
-        for i, candidate in enumerate(row.candidates):
-            self.list.InsertItem(i, candidate.pn)
-            self.list.SetItem(i, 1, candidate.description)
-            self.list.SetItem(i, 2, candidate.brand)
-            self.list.SetItem(i, 3, f"{candidate.material.stock:g}")
-            self.list.SetItem(i, 4, "优选" if candidate.brand_rank < 100 else
-                              ("备选" if candidate.brand_rank < 1000 else "其他"))
-            if candidate.material.disabled:
-                self.list.SetItemTextColour(i, wx.Colour(150, 150, 150))
-        if row.candidates:
-            self.list.Select(0)
+        # 默认按自动匹配的优先级排序；点表头可改排序
+        self.candidates: List[Candidate] = list(row.candidates)
+        self.sort_column = -1
+        self.sort_ascending = True
+        self._fill_list()
         sizer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -307,13 +303,79 @@ class CandidateDialog(wx.Dialog):
         self.btn_manual.Bind(wx.EVT_BUTTON, self._on_manual)
         self.btn_search.Bind(wx.EVT_BUTTON, self._on_search)
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_ok)
+        self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_col_click)
+
+    # -- 排序 -------------------------------------------------------------
+    #: 列表表头（排序箭头要重写表头文字）
+    TITLES = ["物料编码", "描述", "品牌", "库存", "优先级"]
+
+    def _priority_text(self, candidate: Candidate) -> str:
+        return ("优选" if candidate.brand_rank < 100 else
+                ("备选" if candidate.brand_rank < 1000 else "其他"))
+
+    def _on_col_click(self, event) -> None:
+        column = event.GetColumn()
+        if column == self.sort_column:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column = column
+            self.sort_ascending = True
+        self._fill_list()
+
+    def _sort_key(self, candidate: Candidate, column: int):
+        if column == 0:
+            return natural_key(candidate.pn)
+        if column == 1:
+            return natural_key(candidate.description)
+        if column == 2:
+            return candidate.brand or ""
+        if column == 3:
+            return float(candidate.material.stock or 0)
+        if column == 4:
+            return candidate.brand_rank
+        return ""
+
+    def _fill_list(self) -> None:
+        selected = self.list.GetFirstSelected()
+        keep_pn = ""
+        if 0 <= selected < len(self.candidates):
+            keep_pn = self.candidates[selected].pn
+        if self.sort_column >= 0:
+            self.candidates.sort(key=lambda c: self._sort_key(c, self.sort_column),
+                                 reverse=not self.sort_ascending)
+        self.list.DeleteAllItems()
+        for i, candidate in enumerate(self.candidates):
+            self.list.InsertItem(i, candidate.pn)
+            self.list.SetItem(i, 1, candidate.description)
+            self.list.SetItem(i, 2, candidate.brand)
+            self.list.SetItem(i, 3, f"{candidate.material.stock:g}")
+            self.list.SetItem(i, 4, self._priority_text(candidate))
+            if candidate.material.disabled:
+                self.list.SetItemTextColour(i, wx.Colour(150, 150, 150))
+        if self.candidates:
+            index = 0
+            for i, candidate in enumerate(self.candidates):
+                if keep_pn and candidate.pn == keep_pn:
+                    index = i
+                    break
+            self.list.Select(index)
+            self.list.EnsureVisible(index)
+        # 表头排序箭头
+        for idx, title in enumerate(self.TITLES):
+            text = title
+            if idx == self.sort_column:
+                text += " ▲" if self.sort_ascending else " ▼"
+            item = wx.ListItem()
+            item.SetText(text)
+            item.SetWidth(self.list.GetColumnWidth(idx))
+            self.list.SetColumn(idx, item)
 
     def _on_ok(self, _event) -> None:
         index = self.list.GetFirstSelected()
-        if index < 0 or index >= len(self.row.candidates):
+        if index < 0 or index >= len(self.candidates):
             wx.MessageBox("请先选择一个物料。", APP_TITLE, wx.OK | wx.ICON_INFORMATION, self)
             return
-        self.choice = self.row.candidates[index]
+        self.choice = self.candidates[index]
         self.EndModal(wx.ID_OK)
 
     def _on_search(self, _event) -> None:
@@ -715,6 +777,8 @@ class ErpToSchDialog(wx.Dialog):
         self.config = Config()
         self.materials: List[Material] = []
         self.parsed_materials: List[ParsedMaterial] = []
+        #: 料号 -> 解析后的物料（搜索后回显库存/品牌用）
+        self._parsed_by_pn: Dict[str, ParsedMaterial] = {}
         self.rows: List[MatchRow] = []
         self.schematic_files: List[str] = []
         self.root_schematic = ""
@@ -872,6 +936,7 @@ class ErpToSchDialog(wx.Dialog):
                 self.materials = load_materials(erp, self.config.cache_dir)
                 self.parsed_materials = [parse_material(m, self.config)
                                          for m in self.materials if not m.disabled]
+                self._parsed_by_pn = {pm.material.pn: pm for pm in self.parsed_materials}
         except Exception as exc:  # noqa: BLE001
             del cursor
             self._log(f"物料表读取失败: {exc}")
@@ -1008,6 +1073,7 @@ class ErpToSchDialog(wx.Dialog):
         self.rows = unique
         for row in self.rows:
             self._refresh_group_status(row)
+        counts = self._verify_existing()
 
         self._apply_sort()
         self._refresh_list()
@@ -1018,6 +1084,9 @@ class ErpToSchDialog(wx.Dialog):
             self._log(f"扫描 {os.path.basename(root)}：共 {sum(r.member_count for r in self.rows)} 个元件、"
                       f"{len(self.rows)} 组（跳过电源符号 {skipped} 个），"
                       f"已有 PartNumber {ready} 组，待匹配 {pending} 组。")
+            flagged = "，".join(f"{k} {v} 组" for k, v in counts.items() if v)
+            if flagged:
+                self._log(f"核对已有数据：{flagged}（红色=料号/描述有问题，橙色=不是最优料）。")
 
     def _apply_match(self, row: MatchRow) -> None:
         """对单行执行匹配，把结果写回该行（不动其他行）。"""
@@ -1028,6 +1097,67 @@ class ErpToSchDialog(wx.Dialog):
         row.description = matched.description
         row.status = matched.status
         row.note = matched.note
+
+    # -- 核对原理图里已有的 PartNumber / 描述 ------------------------------
+    @staticmethod
+    def _desc_key(text: str) -> str:
+        """描述比对用的归一化（忽略大小写/全角/空格/分隔符差异）。"""
+        normalized = unicodedata.normalize("NFKC", text or "").upper()
+        return re.sub(r"[\s,，、;；:：]+", "", normalized)
+
+    def _verify_existing(self) -> Dict[str, int]:
+        """扫描时核对已有料号/描述是否正确、是否最优。
+
+        * 料号在 ERP 里找不到 / 描述与 ERP 不一致 / 料号不适配该元件 → 料号有误类状态（红）
+        * 料号没问题但有更优的料 → 非最优（橙）
+        """
+        by_pn: Dict[str, Material] = {}
+        for material in self.materials:
+            pn = (material.pn or "").strip()
+            if pn:
+                by_pn[pn] = material
+        counts = {"料号有误": 0, "描述不符": 0, "料号不匹配": 0, "非最优": 0}
+        for row in self.rows:
+            pn = (row.pn or "").strip()
+            if not pn or row.status == "不上件跳过":
+                continue
+            material = by_pn.get(pn)
+            if material is None:
+                if not is_electronic_pn(pn):
+                    # 「新料」占位、非电子料号等不判定为错误
+                    continue
+                row.status = "料号有误"
+                row.note = f"ERP 物料表里找不到料号 {pn}"
+                counts["料号有误"] += 1
+                continue
+            spec = (material.spec or "").strip()
+            if row.description and self._desc_key(row.description) != self._desc_key(spec):
+                row.status = "描述不符"
+                row.note = f"ERP 里的描述是：{spec}"
+                counts["描述不符"] += 1
+                continue
+            if not row.comp.kind:
+                continue
+            candidates = build_candidates(row.comp, self.materials, self.config,
+                                          self.parsed_materials)
+            row.candidates = candidates
+            if not candidates:
+                row.status = "料号不匹配"
+                row.note = "该料号不适配此元件（规格不符），可右键「匹配此行」重新匹配"
+                counts["料号不匹配"] += 1
+                continue
+            if pn not in {c.pn for c in candidates}:
+                row.status = "料号不匹配"
+                row.note = "该料号不适配此元件（规格不符），可右键「匹配此行」重新匹配"
+                counts["料号不匹配"] += 1
+                continue
+            best = auto_select(candidates, self.config, row.comp.kind)
+            if best is not None and best.pn != pn:
+                row.status = "非最优"
+                row.note = (f"更优的料：{best.pn} {best.description}"
+                            f"（库存 {best.material.stock:g}）")
+                counts["非最优"] += 1
+        return counts
 
     def _kind_label(self, kind: str) -> str:
         return KIND_LABELS.get(kind, kind or "其他")
@@ -1080,14 +1210,15 @@ class ErpToSchDialog(wx.Dialog):
             "（当前：" + ("、".join(self._kind_label(k) for k in enabled) or "无") + "）")
 
     def _match_all(self, interactive: bool = True) -> None:
-        """只匹配还没有 PartNumber 的行；已有数据的一律不动。"""
+        """匹配：空行自动匹配；核对出问题的行（料号有误/描述不符/不适配）一并修复。"""
         if not self.rows:
             if interactive:
                 wx.MessageBox("还没有元件，请先点「扫描」。", APP_TITLE,
                               wx.OK | wx.ICON_INFORMATION, self)
             return
+        redo = ("未匹配", "料号有误", "描述不符", "料号不匹配")
         todo = [r for r in self.rows
-                if r.status == "未匹配" and self._match_kind_enabled(r.comp)]
+                if r.status in redo and self._match_kind_enabled(r.comp)]
         if not todo:
             if interactive:
                 wx.MessageBox("没有需要匹配的元件（都已有 PartNumber 或标记为不上件）。",
@@ -1173,13 +1304,18 @@ class ErpToSchDialog(wx.Dialog):
                 row.note = "按型号匹配"
             else:
                 row.status = "未自动匹配"
-                row.note = ("该类型不参与自动匹配（如 LED/连接器），可手动搜索物料或右键生成新料"
+                row.note = ("该类型不参与自动匹配（如连接器/开关），可手动搜索物料或右键生成新料"
                             if not row.candidates else "有多个同型号物料，请「选择候选…」")
             return row
 
         if comp.kind in ("R", "C") and comp.mount == "SMT" and not comp.size:
             row.status = "缺少封装"
             row.note = "无法从 Footprint 识别尺寸"
+            return row
+
+        if comp.kind == "LED" and not comp.size:
+            row.status = "缺少封装"
+            row.note = "无法从 Footprint 识别 LED 封装（如 0603 / 2835）"
             return row
 
         if comp.kind in ("R", "C", "L", "X", "XO") and comp.value_num is None:
@@ -1239,7 +1375,13 @@ class ErpToSchDialog(wx.Dialog):
             self.list.SetItem(idx, 7, row.brand)
             self.list.SetItem(idx, 8, row.stock)
             self.list.SetItem(idx, 9, str(len(row.candidates)))
-            if row.status == "新料":
+            if row.status in ("料号有误", "描述不符", "料号不匹配"):
+                # 已有料号/描述与 ERP 对应不上 → 红色
+                self.list.SetItemTextColour(idx, wx.Colour(200, 0, 0))
+            elif row.status == "非最优":
+                # 料号没问题，但不是最优选择 → 橙色
+                self.list.SetItemTextColour(idx, wx.Colour(230, 140, 0))
+            elif row.status == "新料":
                 self.list.SetItemTextColour(idx, wx.Colour(200, 90, 0))
             elif row.status == "已匹配":
                 self.list.SetItemTextColour(idx, wx.Colour(0, 120, 0))
@@ -1571,6 +1713,9 @@ class ErpToSchDialog(wx.Dialog):
         row.description = material.spec
         row.status = "手动"
         row.note = "手动选择"
+        # 让品牌 / 库存能回显（与「选择候选…」保持一致）
+        parsed = self._parsed_by_pn.get(material.pn) or parse_material(material, self.config)
+        row.selected = Candidate(parsed=parsed)
 
     def _pick_candidate(self) -> None:
         row = self._selected_row()
@@ -1644,7 +1789,7 @@ class ErpToSchDialog(wx.Dialog):
             "（当前：" + ("、".join(enabled) or "未选择") + "）")
 
     def _write_enabled(self, row: MatchRow) -> bool:
-        if row.status == "已匹配":
+        if row.status in ("已匹配", "非最优"):
             return self.write_filters.get("已匹配", True)
         if row.status == "新料":
             return self.write_filters.get("新料", True)

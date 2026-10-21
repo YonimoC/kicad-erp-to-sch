@@ -171,7 +171,8 @@ def main() -> int:
     assert results["R2"][0] == "101010646", results["R2"]
     assert results["C1"][0].startswith("102"), results["C1"]
     assert results["D1"][0] == "104010117", results["D1"]
-    assert results["D2"] == ("", ""), results["D2"]
+    # 发光二极管现在也按封装 + 颜色参与匹配
+    assert results["D2"][0] and "发光二极管" in results["D2"][1], results["D2"]
     assert results["Q1"][0] and "BC847C" in results["Q1"][1].upper(), results["Q1"]
     assert results["Q2"][0] and "AO3400A" in results["Q2"][1].upper(), results["Q2"]
     print("\nQ1:", results["Q1"])
