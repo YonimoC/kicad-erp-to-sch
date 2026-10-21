@@ -97,7 +97,9 @@ class MaterialSearchDialog(wx.Dialog):
 
     def __init__(self, parent: wx.Window, materials: Sequence[Material],
                  keyword: str = "", title: str = "搜索 ERP 物料"):
-        super().__init__(parent, title=title, size=(980, 560))
+        super().__init__(parent, title=title, size=(980, 560),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
+        self.SetMinSize((780, 460))
         self.materials = materials
         self.results: List[Material] = []
         self.material: Optional[Material] = None
@@ -255,7 +257,9 @@ class MaterialSearchDialog(wx.Dialog):
 class CandidateDialog(wx.Dialog):
     def __init__(self, parent: wx.Window, row: MatchRow,
                  materials: Sequence[Material]):
-        super().__init__(parent, title=f"选择物料 - {row.comp.reference}", size=(980, 500))
+        super().__init__(parent, title=f"选择物料 - {row.comp.reference}", size=(980, 500),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
+        self.SetMinSize((780, 440))
         self.row = row
         self.materials = materials
         self.choice: Optional[Candidate] = None
@@ -407,7 +411,9 @@ class CandidateDialog(wx.Dialog):
 # --------------------------------------------------------------------------
 class RulesDialog(wx.Dialog):
     def __init__(self, parent: wx.Window):
-        super().__init__(parent, title="物料参数要求（内置）", size=(760, 520))
+        super().__init__(parent, title="物料参数要求（内置）", size=(760, 520),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
+        self.SetMinSize((620, 420))
         panel = wx.Panel(self)
         sizer = wx.BoxSizer(wx.VERTICAL)
         text = wx.TextCtrl(panel, value=erp_rules.rule_text(),
@@ -432,7 +438,9 @@ class EditRowDialog(wx.Dialog):
     """双击行后的编辑：Value / PartNumber / 描述 均可改。"""
 
     def __init__(self, parent: wx.Window, row: MatchRow):
-        super().__init__(parent, title=f"编辑元件 - {row.references}", size=(720, 380))
+        super().__init__(parent, title=f"编辑元件 - {row.references}", size=(720, 380),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
+        self.SetMinSize((620, 340))
         self.row = row
         comp = row.comp
 
@@ -491,7 +499,9 @@ class NewItemDialog(wx.Dialog):
     """按内置参数要求表生成新料描述，类别可选、描述可编辑。"""
 
     def __init__(self, parent: wx.Window, row: MatchRow, config: Config):
-        super().__init__(parent, title=f"生成新料描述 - {row.references}", size=(860, 460))
+        super().__init__(parent, title=f"生成新料描述 - {row.references}", size=(860, 460),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
+        self.SetMinSize((720, 400))
         self.row = row
         self.comp = row.comp
         self.config = config
@@ -772,8 +782,13 @@ class SplitButton(wx.Panel):
 # 主对话框
 # --------------------------------------------------------------------------
 class ErpToSchDialog(wx.Dialog):
+    #: 窗口最小尺寸（低于此不能再缩小）
+    MIN_SIZE = (1000, 620)
+
     def __init__(self, parent: Optional[wx.Window] = None):
-        super().__init__(parent, title=APP_TITLE, size=(1280, 760))
+        super().__init__(parent, title=APP_TITLE,
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER
+                         | wx.MAXIMIZE_BOX | wx.MINIMIZE_BOX)
         self.config = Config()
         self.materials: List[Material] = []
         self.parsed_materials: List[ParsedMaterial] = []
@@ -786,6 +801,8 @@ class ErpToSchDialog(wx.Dialog):
         self.sort_ascending = True
         self._column_titles: List[str] = []
         self._column_widths: List[int] = []
+        #: 上一次实际应用的列宽（避免重复设列宽导致重排死循环）
+        self._col_widths_applied: List[int] = []
         #: 写入范围（默认全选）
         self.write_filters: Dict[str, bool] = {"已匹配": True, "新料": True, "手动": True}
         #: 参与自动匹配的类别（默认全选）
@@ -797,6 +814,8 @@ class ErpToSchDialog(wx.Dialog):
         self._editor_ctx: Optional[Tuple[MatchRow, str]] = None
         #: 上次编辑的列（键盘回车激活时沿用）
         self._last_edit_column = 2
+        #: 退出全屏/最大化时恢复的窗口尺寸
+        self._restore_size: Optional[Tuple[int, int]] = None
 
         self._build_ui()
         self._detect_project()
@@ -811,6 +830,88 @@ class ErpToSchDialog(wx.Dialog):
         button = wx.Button(panel, label=label)
         button.SetMinSize((-1, SplitButton.HEIGHT))
         return button
+
+    # -- 窗口自适应 -------------------------------------------------------
+    #: 各列最小宽度（窗口再窄就出现横向滚动条，不继续压）
+    _COL_MIN = [90, 46, 90, 66, 86, 100, 150, 54, 44, 40]
+    #: 自动吃掉剩余宽度的列（描述）
+    _FLEX_COL = 6
+
+    def _apply_window_bounds(self) -> None:
+        """按屏幕工作区自适应初始尺寸，并设定最小尺寸（低于此不能再缩）。"""
+        area = wx.Display().GetClientArea()
+        index = wx.Display.GetFromWindow(self)
+        if index != wx.NOT_FOUND:
+            area = wx.Display(index).GetClientArea()
+        width = max(self.MIN_SIZE[0], int(area.width * 0.92))
+        height = max(self.MIN_SIZE[1], int(area.height * 0.92))
+        self.SetMinSize(self.MIN_SIZE)
+        # 上次的窗口大小（在屏幕内、不小于最小尺寸时沿用）
+        saved = self.config.get("window_size") or []
+        if (isinstance(saved, (list, tuple)) and len(saved) == 2
+                and self.MIN_SIZE[0] <= int(saved[0]) <= area.width
+                and self.MIN_SIZE[1] <= int(saved[1]) <= area.height):
+            width, height = int(saved[0]), int(saved[1])
+        self.SetSize((min(width, area.width), min(height, area.height)))
+        self.Centre()
+
+    def _on_window_size(self, event) -> None:
+        """窗口缩放：重排列宽（描述列吃剩余空间），并取消正在编辑的单元格。"""
+        event.Skip()
+        if getattr(self, "_editor", None) is not None:
+            self._cancel_inline_edit()
+        wx.CallAfter(self._layout_columns)
+
+    def _on_char_hook(self, event) -> None:
+        """F11 切换全屏（全屏时表格能充分利用屏幕）。"""
+        if event.GetKeyCode() == wx.WXK_F11:
+            self._toggle_fullscreen()
+        else:
+            event.Skip()
+
+    def _toggle_fullscreen(self) -> None:
+        try:
+            if self.IsFullScreen():
+                self.ShowFullScreen(False)
+                if self._restore_size:
+                    self.SetSize(self._restore_size)
+            else:
+                self._restore_size = (self.GetSize().width, self.GetSize().height)
+                self.ShowFullScreen(True, wx.FULLSCREEN_ALL)
+        except Exception:  # noqa: BLE001  某些窗口管理器不支持全屏时退回最大化
+            self.Maximize(not self.IsMaximized())
+        wx.CallAfter(self._layout_columns)
+
+    def _layout_columns(self) -> None:
+        """按当前列表可用宽度重新分配列宽。"""
+        total = self.list.GetClientSize().width
+        if total <= 0 or not self._column_widths:
+            return
+        flex = self._FLEX_COL
+        widths = list(self._column_widths)
+        others = [i for i in range(len(widths)) if i != flex]
+        others_total = sum(widths[i] for i in others)
+        rest = total - others_total - 4       # 4px 余量，免得老是弹横向滚动条
+        if rest >= self._COL_MIN[flex]:
+            widths[flex] = rest
+        else:
+            # 空间不够：非描述列按各自可压缩空间等比让出，保证描述列不低于最小宽
+            deficit = self._COL_MIN[flex] - rest
+            room = {i: max(0, widths[i] - self._COL_MIN[i]) for i in others}
+            total_room = sum(room.values())
+            if total_room > 0:
+                for idx, space in room.items():
+                    if not space:
+                        continue
+                    widths[idx] -= min(space, int(round(deficit * space / total_room)))
+            widths[flex] = max(self._COL_MIN[flex],
+                               total - sum(widths[i] for i in others) - 4)
+        if widths == self._col_widths_applied:
+            return
+        self._col_widths_applied = widths
+        for idx, width in enumerate(widths):
+            if self.list.GetColumnWidth(idx) != width:
+                self.list.SetColumnWidth(idx, width)
 
     def _build_ui(self) -> None:
         panel = wx.Panel(self)
@@ -866,6 +967,7 @@ class ErpToSchDialog(wx.Dialog):
         outer = wx.BoxSizer(wx.VERTICAL)
         outer.Add(panel, 1, wx.EXPAND)
         self.SetSizer(outer)
+        self._apply_window_bounds()
         self.Layout()
 
         self.txt_erp.Bind(wx.EVT_KILL_FOCUS, lambda e: self._on_path_changed())
@@ -879,7 +981,11 @@ class ErpToSchDialog(wx.Dialog):
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._activate_row)
         self.list.Bind(wx.EVT_LIST_COL_CLICK, self._on_column_click)
         self.list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._on_right_click)
+        self.list.Bind(wx.EVT_SIZE, lambda e: (e.Skip(), wx.CallAfter(self._layout_columns)))
+        self.Bind(wx.EVT_SIZE, self._on_window_size)
+        self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
         self.Bind(wx.EVT_CLOSE, self._on_close)
+        wx.CallAfter(self._layout_columns)
 
     # -- 路径 -------------------------------------------------------------
     def _browse_erp(self) -> None:
@@ -1356,7 +1462,8 @@ class ErpToSchDialog(wx.Dialog):
                 text += " ▲" if self.sort_ascending else " ▼"
             item = wx.ListItem()
             item.SetText(text)
-            item.SetWidth(self._column_widths[idx])
+            # 列宽保持当前值（自适应由 _layout_columns 管），否则会把缩放后的宽度冲掉
+            item.SetWidth(self.list.GetColumnWidth(idx) or self._column_widths[idx])
             self.list.SetColumn(idx, item)
 
     def _refresh_list(self, keep_view: bool = True) -> None:
@@ -1909,6 +2016,11 @@ class ErpToSchDialog(wx.Dialog):
 
     def _on_close(self, event: wx.CloseEvent) -> None:
         self._on_path_changed()
+        # 记住窗口大小（全屏时记录退出前的尺寸）
+        size = self._restore_size if self.IsFullScreen() and self._restore_size else self.GetSize()
+        if not self.IsMaximized() and not self.IsFullScreen():
+            self.config.set("window_size", [size.width, size.height])
+        self.config.save()
         event.Skip()
 
 
