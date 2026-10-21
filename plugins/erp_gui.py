@@ -7,7 +7,9 @@ import re
 import time
 import traceback
 import unicodedata
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import wx
@@ -32,7 +34,9 @@ from erp_match import (
     is_electronic_pn,
     is_tht_footprint,
     material_fits,
+    MaterialIndex,
     parse_material,
+    parse_materials,
     search_keyword,
     search_normalize,
 )
@@ -794,6 +798,8 @@ class ErpToSchDialog(wx.Dialog):
         self.parsed_materials: List[ParsedMaterial] = []
         #: 料号 -> 解析后的物料（搜索后回显库存/品牌用）
         self._parsed_by_pn: Dict[str, ParsedMaterial] = {}
+        #: 物料索引（按类别/贴片插件/数值分桶，加速匹配）
+        self.matindex: Optional[MaterialIndex] = None
         self.rows: List[MatchRow] = []
         self.schematic_files: List[str] = []
         self.root_schematic = ""
@@ -819,9 +825,8 @@ class ErpToSchDialog(wx.Dialog):
 
         self._build_ui()
         self._detect_project()
-        self._load_data(verbose=True)
-        # 打开插件先自动扫描（只读，不改任何东西）
-        wx.CallAfter(self._auto_scan)
+        # 先把窗口显示出来，物料表读取 / 解析 / 自动扫描放到空闲时做，避免开窗卡顿
+        wx.CallAfter(self._startup)
 
     # -- UI ---------------------------------------------------------------
     @staticmethod
@@ -1034,15 +1039,52 @@ class ErpToSchDialog(wx.Dialog):
             self.txt_project.SetValue("")
             self._log("未检测到当前打开的工程（请确认已在 KiCad 中打开原理图）。")
 
+    # -- 启动 -------------------------------------------------------------
+    def _startup(self) -> None:
+        """窗口出现后再读物料表并自动扫描（只读，不改任何东西）。"""
+        self._log("正在读取 ERP 物料表…")
+        self._load_data(verbose=True)
+        self._auto_scan()
+
+    def _parsed_cache_file(self) -> Optional[Path]:
+        """物料解析缓存文件（ERP 文件变了就换一个，自动失效）。"""
+        erp = self.txt_erp.GetValue().strip()
+        cache_dir = self.config.cache_dir
+        if not erp or not cache_dir:
+            return None
+        try:
+            stat = os.stat(erp)
+        except OSError:
+            return None
+        key = f"{erp}|{int(stat.st_mtime)}|{stat.st_size}|{PLUGIN_VERSION}"
+        digest = hashlib.md5(key.encode("utf-8")).hexdigest()[:16]
+        return Path(cache_dir) / f"parsed-{digest}.json"
+
+    @staticmethod
+    def _prune_parse_cache(keep: Optional[Path]) -> None:
+        """删掉 ERP 历史版本遗留的解析缓存，只留当前这份。"""
+        if keep is None:
+            return
+        try:
+            for old in Path(keep).parent.glob("parsed-*.json"):
+                if old.name != Path(keep).name:
+                    old.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001  清理失败不影响使用
+            pass
+
     def _load_data(self, verbose: bool = True, force: bool = False) -> None:
         erp = self.txt_erp.GetValue().strip()
         cursor = wx.BusyCursor()
+        started = time.time()
         try:
             if force or not self.materials:
                 self.materials = load_materials(erp, self.config.cache_dir)
-                self.parsed_materials = [parse_material(m, self.config)
-                                         for m in self.materials if not m.disabled]
+                cache_file = self._parsed_cache_file()
+                self.parsed_materials = parse_materials(
+                    self.materials, self.config, cache_file=cache_file)
                 self._parsed_by_pn = {pm.material.pn: pm for pm in self.parsed_materials}
+                self.matindex = MaterialIndex(self.parsed_materials)
+                self._prune_parse_cache(cache_file)
         except Exception as exc:  # noqa: BLE001
             del cursor
             self._log(f"物料表读取失败: {exc}")
@@ -1050,7 +1092,9 @@ class ErpToSchDialog(wx.Dialog):
             return
         del cursor
         if verbose:
-            self._log(f"物料表: {len(self.materials)} 条")
+            elapsed = (time.time() - started) * 1000
+            self._log(f"物料表: {len(self.materials)} 条（解析 {len(self.parsed_materials)} 条，"
+                      f"耗时 {elapsed:.0f} ms）")
 
     # -- 扫描 -------------------------------------------------------------
     def _resolve_root_schematic(self) -> str:
@@ -1110,7 +1154,13 @@ class ErpToSchDialog(wx.Dialog):
         row.note = "点「匹配」按 ERP 物料表自动匹配"
         return row
 
+    def _ensure_materials(self) -> None:
+        """物料表还没读（启动尚未完成）时先补上，避免扫到空表。"""
+        if not self.materials:
+            self._load_data(verbose=False)
+
     def _scan(self, interactive: bool = True, verbose: bool = True) -> None:
+        self._ensure_materials()
         root = self._resolve_root_schematic()
         if not root:
             if not interactive:
@@ -1245,7 +1295,7 @@ class ErpToSchDialog(wx.Dialog):
             if not row.comp.kind:
                 continue
             candidates = build_candidates(row.comp, self.materials, self.config,
-                                          self.parsed_materials)
+                                          self.parsed_materials, index=self.matindex)
             row.candidates = candidates
             if not candidates:
                 row.status = "料号不匹配"
@@ -1317,6 +1367,7 @@ class ErpToSchDialog(wx.Dialog):
 
     def _match_all(self, interactive: bool = True) -> None:
         """匹配：空行自动匹配；核对出问题的行（料号有误/描述不符/不适配）一并修复。"""
+        self._ensure_materials()
         if not self.rows:
             if interactive:
                 wx.MessageBox("还没有元件，请先点「扫描」。", APP_TITLE,
@@ -1434,7 +1485,7 @@ class ErpToSchDialog(wx.Dialog):
             return row
 
         row.candidates = build_candidates(comp, self.materials, self.config,
-                                          self.parsed_materials)
+                                          self.parsed_materials, index=self.matindex)
         chosen = auto_select(row.candidates, self.config, comp.kind)
         if chosen is not None:
             row.selected = chosen
@@ -1825,6 +1876,7 @@ class ErpToSchDialog(wx.Dialog):
         row.selected = Candidate(parsed=parsed)
 
     def _pick_candidate(self) -> None:
+        self._ensure_materials()
         row = self._selected_row()
         if row is None:
             wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE,
@@ -1849,6 +1901,7 @@ class ErpToSchDialog(wx.Dialog):
         self._refresh_list()
 
     def _search_material(self) -> None:
+        self._ensure_materials()
         row = self._selected_row()
         if row is None:
             wx.MessageBox("请先在列表中选择一个元件。", APP_TITLE,
